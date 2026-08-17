@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,10 +14,20 @@ configure_logging()
 settings = get_settings()
 logger = get_logger(__name__)
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Manage application startup and shutdown."""
+    logger.info("application_started")
+
+    yield
+
+    logger.info("application_stopped")
+
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Backend API for the Autonomous Multi-Agent Research Analyst.",
+    lifespan=lifespan,
 )
 
 
@@ -104,12 +116,6 @@ async def unexpected_exception_handler(
         },
     )
 
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Run application startup tasks."""
-
-    logger.info("application_started")
 
 
 @app.get("/api/health")

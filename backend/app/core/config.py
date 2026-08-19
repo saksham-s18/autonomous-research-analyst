@@ -49,6 +49,14 @@ class Settings(BaseSettings):
         description="Application logging level.",
     )
 
+    database_url: str = Field(
+        description="Async PostgreSQL database connection URL.",
+    )
+
+    redis_url: str = Field(
+        description="Redis connection URL.",
+    )
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Return CORS origins as a cleaned list."""

@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.research import router as research_router
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.logging import configure_logging, get_logger
@@ -30,6 +31,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(
+    research_router,
+    prefix=settings.api_v1_prefix,
+)
 
 app.add_middleware(
     CORSMiddleware,

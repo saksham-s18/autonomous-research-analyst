@@ -4,6 +4,38 @@ from typing import TypedDict
 from uuid import UUID
 
 
+class ResearchPlan(TypedDict):
+    """Structured research plan generated from a research question."""
+
+    goal: str
+    subquestions: list[str]
+
+
+class Source(TypedDict):
+    """A source discovered during research."""
+
+    title: str
+    url: str
+    publisher: str | None
+    published_at: str | None
+
+
+class Evidence(TypedDict):
+    """Evidence extracted from a research source."""
+
+    subquestion: str
+    claim: str
+    source_url: str
+    relevance: float
+
+
+class Conflict(TypedDict):
+    """A disagreement between pieces of research evidence."""
+
+    topic: str
+    claims: list[str]
+    explanation: str
+
 class ResearchState(TypedDict):
     """State shared across the autonomous research workflow."""
 
@@ -11,17 +43,14 @@ class ResearchState(TypedDict):
     question: str
     status: str
 
-    research_plan: list[str]
+    research_plan: ResearchPlan
 
     current_subquestion: str | None
     completed_subquestions: list[str]
 
-    evidence: list[dict[str, object]]
-    sources: list[dict[str, object]]
-    conflicts: list[dict[str, object]]
-
-    research_iterations: int
-    max_research_iterations: int
+    evidence: list[Evidence]
+    sources: list[Source]
+    conflicts: list[Conflict]
 
     draft_report: str | None
     final_report: str | None

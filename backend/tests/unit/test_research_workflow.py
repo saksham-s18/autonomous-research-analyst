@@ -27,6 +27,8 @@ def test_research_workflow_runs() -> None:
     result = graph.invoke(state)
 
     assert result["status"] == "synthesizing"
-    assert len(result["research_plan"]) == 4
+    assert len(result["research_plan"]) == 3
+    assert len(result["completed_subquestions"]) == 3
+    assert result["current_subquestion"] is None
     assert result["research_iterations"] == 3
     assert result["question"] == "What are the effects of AI automation?"

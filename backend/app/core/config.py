@@ -57,6 +57,16 @@ class Settings(BaseSettings):
         description="Redis connection URL.",
     )
 
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout: float = 30.0
+    tavily_api_key: str | None = None
+    tavily_max_results: int = 5
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5-mini"
+    openai_timeout: float = 30.0
+    
     @property
     def cors_origins_list(self) -> list[str]:
         """Return CORS origins as a cleaned list."""
@@ -66,8 +76,18 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    def require_llm_api_key(self) -> str:
+        """Return the configured LLM API key or raise a clear error."""
+
+        if not self.llm_api_key:
+            raise ValueError("LLM_API_KEY is not configured.")
+
+        return self.llm_api_key
+
 
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached application settings instance."""
     return Settings()
+
+settings = get_settings()

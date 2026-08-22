@@ -1,29 +1,47 @@
 """Nodes used by the research workflow."""
-
+import logging
+import httpx
+from app.agents.evidence import EvidenceAgent
+from app.agents.planner import PlannerAgent
+from app.agents.researcher import ResearchAgent
 from app.graph.state import ResearchState
+from app.llm.factory import (
+    create_fallback_llm_client,
+    create_primary_llm_client,
+)
+from app.llm.resilient import ResilientLLMClient
+from app.tools.factory import create_search_tool
+from app.tools.http_fetcher import HttpSourceFetcher
 
+logger = logging.getLogger(__name__)
 
-def planner_node(state: ResearchState) -> ResearchState:
-    """Create an initial research plan from the question."""
+async def planner_node(state: ResearchState) -> ResearchState:
+    """Generate a research plan using the planner agent."""
 
-    subquestions = [
-        f"What are the main aspects of: {state['question']}?",
-        f"What evidence exists regarding: {state['question']}?",
-        f"What are the potential benefits and risks of: {state['question']}?",
-    ]
+    planner = create_planner_agent()
 
-    research_plan = {
-        "goal": state["question"],
-        "subquestions": subquestions,
-    }
+    plan = await planner.create_plan(state["question"])
 
     return {
         **state,
         "status": "planning",
-        "research_plan": research_plan,
+        "research_plan": {
+            "goal": plan.goal,
+            "subquestions": plan.subquestions,
+        },
         "current_subquestion": None,
         "completed_subquestions": [],
     }
+
+def create_planner_agent() -> PlannerAgent:
+    """Create the configured planner agent."""
+
+    llm_client = ResilientLLMClient(
+        primary=create_primary_llm_client(),
+        fallback=create_fallback_llm_client(),
+    )
+
+    return PlannerAgent(llm_client)
 
 
 def select_subquestion_node(state: ResearchState) -> ResearchState:
@@ -49,8 +67,18 @@ def select_subquestion_node(state: ResearchState) -> ResearchState:
         "status": "researching",
     }
 
-def research_node(state: ResearchState) -> ResearchState:
-    """Placeholder for the future research agent."""
+def create_evidence_agent() -> EvidenceAgent:
+    """Create the configured evidence extraction agent."""
+
+    llm_client = ResilientLLMClient(
+        primary=create_primary_llm_client(),
+        fallback=create_fallback_llm_client(),
+    )
+
+    return EvidenceAgent(llm_client)
+
+async def research_node(state: ResearchState) -> ResearchState:
+    """Research the current subquestion and extract evidence."""
 
     current = state["current_subquestion"]
 
@@ -60,19 +88,55 @@ def research_node(state: ResearchState) -> ResearchState:
             "status": "researching",
         }
 
-    source = {
-        "title": "Placeholder Research Source",
-        "url": "https://example.com/research",
-        "publisher": "Placeholder Publisher",
-        "published_at": None,
-    }
+    researcher = create_research_agent()
+    fetcher = HttpSourceFetcher()
+    evidence_agent = create_evidence_agent()
 
-    evidence = {
-        "subquestion": current,
-        "claim": f"Placeholder evidence for: {current}",
-        "source_url": source["url"],
-        "relevance": 1.0,
-    }
+    results = await researcher.research(
+        current,
+        max_results=5,
+    )
+
+    sources = [
+        {
+            "title": result["title"],
+            "url": result["url"],
+            "publisher": None,
+            "published_at": None,
+        }
+        for result in results
+    ]
+
+    evidence = []
+
+    for result in results:
+        try:
+            content = await fetcher.fetch(result["url"])
+
+            extracted = await evidence_agent.extract(
+                subquestion=current,
+                source_url=result["url"],
+                content=content,
+            )
+
+            evidence.append(
+                {
+                    "subquestion": current,
+                    "claim": extracted.claim,
+                    "supporting_text": extracted.supporting_text,
+                    "source_url": result["url"],
+                    "relevance": extracted.relevance,
+                    "confidence": extracted.confidence,
+                }
+            )
+
+        except (httpx.HTTPError, RuntimeError) as exc:
+            logger.warning(
+                "Failed to extract evidence from %s: %s",
+                result["url"],
+                exc,
+            )
+            continue
 
     completed = [
         *state["completed_subquestions"],
@@ -83,10 +147,16 @@ def research_node(state: ResearchState) -> ResearchState:
         **state,
         "status": "researching",
         "completed_subquestions": completed,
-        "sources": [*state["sources"], source],
-        "evidence": [*state["evidence"], evidence],
+        "sources": [
+            *state["sources"],
+            *sources,
+        ],
+        "evidence": [
+            *state["evidence"],
+            *evidence,
+        ],
     }
-
+    
 def route_after_research(state: ResearchState) -> str:
     """Decide whether another subquestion needs research."""
 
@@ -112,3 +182,8 @@ def synthesis_node(state: ResearchState) -> ResearchState:
         "current_subquestion": None,
         "draft_report": None,
     }
+
+def create_research_agent() -> ResearchAgent:
+    """Create the configured research agent."""
+
+    return ResearchAgent(create_search_tool())

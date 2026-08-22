@@ -25,8 +25,10 @@ class Evidence(TypedDict):
 
     subquestion: str
     claim: str
+    supporting_text: str
     source_url: str
     relevance: float
+    confidence: float
 
 
 class Conflict(TypedDict):

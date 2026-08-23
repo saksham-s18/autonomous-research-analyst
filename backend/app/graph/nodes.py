@@ -12,6 +12,7 @@ from app.llm.factory import (
 from app.llm.resilient import ResilientLLMClient
 from app.tools.factory import create_search_tool
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.url_utils import deduplicate_search_results
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ async def research_node(state: ResearchState) -> ResearchState:
         max_results=5,
     )
 
+    results = deduplicate_search_results(results)
     sources = [
         {
             "title": result["title"],

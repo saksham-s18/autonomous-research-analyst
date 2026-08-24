@@ -13,6 +13,7 @@ from app.llm.factory import (
     create_primary_llm_client,
 )
 from app.llm.resilient import ResilientLLMClient
+from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
 from app.tools.http_fetcher import HttpSourceFetcher
 from app.tools.source_quality import assess_source_quality
@@ -132,6 +133,14 @@ async def research_node(state: ResearchState) -> ResearchState:
                 content=content,
             )
 
+            source_quality = assess_source_quality(result["url"])
+
+            evidence_score = calculate_evidence_score(
+                relevance=extracted.relevance,
+                confidence=extracted.confidence,
+                source_quality=source_quality.score,
+            )  
+
             evidence.append(
                 {
                     "subquestion": current,
@@ -140,6 +149,7 @@ async def research_node(state: ResearchState) -> ResearchState:
                     "source_url": result["url"],
                     "relevance": extracted.relevance,
                     "confidence": extracted.confidence,
+                    "evidence_score": evidence_score,
                 }
             )
 
@@ -156,6 +166,11 @@ async def research_node(state: ResearchState) -> ResearchState:
         current,
     ]
 
+    all_evidence = [
+        *state["evidence"],
+        *evidence,
+    ]
+
     return {
         **state,
         "status": "researching",
@@ -164,10 +179,7 @@ async def research_node(state: ResearchState) -> ResearchState:
             *state["sources"],
             *sources,
         ],
-        "evidence": [
-            *state["evidence"],
-            *evidence,
-        ],
+        "evidence": rank_evidence(all_evidence),
     }
     
 def route_after_research(state: ResearchState) -> str:

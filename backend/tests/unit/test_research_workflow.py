@@ -169,6 +169,11 @@ async def test_research_workflow_runs(
     )
 
     assert all(
+    item["evidence_score"] == 0.82
+    for item in result["evidence"]
+    )
+
+    assert all(
         item["subquestion"] in result["completed_subquestions"]
         for item in result["evidence"]
     )

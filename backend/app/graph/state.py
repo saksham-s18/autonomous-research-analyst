@@ -22,6 +22,7 @@ class Source(TypedDict):
     quality_category: str
     quality_reasons: list[str]
 
+
 class Evidence(TypedDict):
     """Evidence extracted from a research source."""
 
@@ -31,6 +32,7 @@ class Evidence(TypedDict):
     source_url: str
     relevance: float
     confidence: float
+    evidence_score: float
 
 
 class Conflict(TypedDict):

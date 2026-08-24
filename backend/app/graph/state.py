@@ -18,7 +18,9 @@ class Source(TypedDict):
     url: str
     publisher: str | None
     published_at: str | None
-
+    quality_score: float
+    quality_category: str
+    quality_reasons: list[str]
 
 class Evidence(TypedDict):
     """Evidence extracted from a research source."""

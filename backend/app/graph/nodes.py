@@ -1,6 +1,9 @@
 """Nodes used by the research workflow."""
+
 import logging
+
 import httpx
+
 from app.agents.evidence import EvidenceAgent
 from app.agents.planner import PlannerAgent
 from app.agents.researcher import ResearchAgent
@@ -12,6 +15,7 @@ from app.llm.factory import (
 from app.llm.resilient import ResilientLLMClient
 from app.tools.factory import create_search_tool
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.source_quality import assess_source_quality
 from app.tools.url_utils import deduplicate_search_results
 
 logger = logging.getLogger(__name__)
@@ -99,15 +103,22 @@ async def research_node(state: ResearchState) -> ResearchState:
     )
 
     results = deduplicate_search_results(results)
-    sources = [
-        {
-            "title": result["title"],
-            "url": result["url"],
-            "publisher": None,
-            "published_at": None,
+    sources = []
+    
+    for result in results:
+        quality = assess_source_quality(result["url"])
+
+        sources.append(
+            {
+                "title": result["title"],
+                "url": result["url"],
+                "publisher": None,
+                "published_at": None,
+                "quality_score": quality.score,
+                "quality_category": quality.category,
+                "quality_reasons": list(quality.reasons),
         }
-        for result in results
-    ]
+    )
 
     evidence = []
 

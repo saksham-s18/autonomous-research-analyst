@@ -129,6 +129,21 @@ async def test_research_workflow_runs(
     assert len(result["evidence"]) == 3
 
     assert all(
+        source["quality_score"] == 0.50
+        for source in result["sources"]
+    )
+
+    assert all(
+        source["quality_category"] == "general_web"
+        for source in result["sources"]
+    )
+
+    assert all(
+        source["quality_reasons"] == ["General web source."]
+        for source in result["sources"]
+    )
+
+    assert all(
         item["source_url"] == "https://example.com/source"
         for item in result["evidence"]
     )

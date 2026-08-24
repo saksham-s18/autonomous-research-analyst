@@ -41,6 +41,9 @@ class Conflict(TypedDict):
     topic: str
     claims: list[str]
     explanation: str
+    conflict_type: str
+    severity: float
+    confidence: float
 
 
 class SourceFailure(TypedDict):

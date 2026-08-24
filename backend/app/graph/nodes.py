@@ -4,6 +4,7 @@ import logging
 
 import httpx
 
+from app.agents.conflict import ConflictAgent
 from app.agents.evidence import EvidenceAgent
 from app.agents.planner import PlannerAgent
 from app.agents.researcher import ResearchAgent
@@ -83,6 +84,17 @@ def create_evidence_agent() -> EvidenceAgent:
     )
 
     return EvidenceAgent(llm_client)
+
+
+def create_conflict_agent() -> ConflictAgent:
+    """Create the configured conflict detection agent."""
+
+    llm_client = ResilientLLMClient(
+        primary=create_primary_llm_client(),
+        fallback=create_fallback_llm_client(),
+    )
+
+    return ConflictAgent(llm_client)
 
 async def research_node(state: ResearchState) -> ResearchState:
     """Research the current subquestion and extract evidence."""
@@ -243,14 +255,60 @@ def route_after_research(state: ResearchState) -> str:
 
     return "synthesis"
 
-def synthesis_node(state: ResearchState) -> ResearchState:
-    """Placeholder for the future synthesis agent."""
+async def synthesis_node(state: ResearchState) -> ResearchState:
+    """Detect evidence conflicts before future report synthesis."""
+
+    if len(state["evidence"]) < 2:
+        return {
+            **state,
+            "status": "synthesizing",
+            "current_subquestion": None,
+            "draft_report": None,
+            "conflicts": [],
+        }
+
+    conflict_agent = create_conflict_agent()
+
+    conflicts = []
+
+    subquestions = state["research_plan"]["subquestions"]
+
+    for subquestion in subquestions:
+        subquestion_evidence = [
+            item
+            for item in state["evidence"]
+            if item["subquestion"] == subquestion
+        ]
+
+        if len(subquestion_evidence) < 2:
+            continue
+
+        detected = await conflict_agent.detect(
+            subquestion=subquestion,
+            evidence=subquestion_evidence,
+        )
+
+        conflicts.extend(
+            {
+                "topic": conflict.topic,
+                "claims": [
+                    conflict.evidence_a,
+                    conflict.evidence_b,
+                ],
+                "explanation": conflict.explanation,
+                "conflict_type": conflict.conflict_type,
+                "severity": conflict.severity,
+                "confidence": conflict.confidence,
+            }
+            for conflict in detected
+        )
 
     return {
         **state,
         "status": "synthesizing",
         "current_subquestion": None,
         "draft_report": None,
+        "conflicts": conflicts,
     }
 
 def create_research_agent() -> ResearchAgent:

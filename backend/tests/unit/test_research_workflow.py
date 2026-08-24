@@ -63,6 +63,16 @@ class FakeEvidenceAgent:
             confidence=0.90,
         )
 
+class FakeConflictAgent:
+    """Fake conflict agent used in workflow tests."""
+
+    async def detect(
+        self,
+        subquestion: str,
+        evidence: list,
+    ) -> list:
+        return []
+
 
 @pytest.mark.asyncio
 async def test_research_workflow_runs(
@@ -79,6 +89,12 @@ async def test_research_workflow_runs(
         nodes,
         "create_research_agent",
         lambda: FakeResearchAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_conflict_agent",
+        lambda: FakeConflictAgent(),
     )
 
     monkeypatch.setattr(
@@ -181,6 +197,8 @@ async def test_research_workflow_runs(
 
     assert result["current_subquestion"] is None
 
+    assert result["conflicts"] == []
+
 
 @pytest.mark.asyncio
 async def test_research_workflow_handles_evidence_agent_failures(
@@ -269,3 +287,98 @@ async def test_research_workflow_handles_evidence_agent_failures(
         failure["error_message"] == "Evidence extraction failed."
         for failure in result["source_failures"]
     )
+
+
+@pytest.mark.asyncio
+async def test_synthesis_detects_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthesis should persist conflicts returned by the agent."""
+
+    class ConflictProducingAgent:
+        async def detect(
+            self,
+            subquestion: str,
+            evidence: list,
+        ) -> list:
+            from app.agents.conflict import ConflictOutput
+
+            return [
+                ConflictOutput(
+                    topic="AI employment",
+                    evidence_a="AI creates jobs.",
+                    evidence_b="AI displaces jobs.",
+                    conflict_type="contextual",
+                    explanation=(
+                        "The evidence describes different employment "
+                        "effects of automation."
+                    ),
+                    severity=0.60,
+                    confidence=0.90,
+                )
+            ]
+
+    monkeypatch.setattr(
+        nodes,
+        "create_conflict_agent",
+        lambda: ConflictProducingAgent(),
+    )
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "researching",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the employment effects of AI?"
+            ],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [
+            "What are the employment effects of AI?"
+        ],
+        "evidence": [
+            {
+                "subquestion": "What are the employment effects of AI?",
+                "claim": "AI creates jobs.",
+                "supporting_text": "New AI roles are emerging.",
+                "source_url": "https://example.com/a",
+                "relevance": 0.90,
+                "confidence": 0.85,
+                "evidence_score": 0.90,
+            },
+            {
+                "subquestion": "What are the employment effects of AI?",
+                "claim": "AI displaces jobs.",
+                "supporting_text": "Some existing roles are automated.",
+                "source_url": "https://example.com/b",
+                "relevance": 0.90,
+                "confidence": 0.85,
+                "evidence_score": 0.85,
+            },
+        ],
+        "sources": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "error": None,
+    }
+
+    result = await nodes.synthesis_node(state)
+
+    assert result["status"] == "synthesizing"
+    assert len(result["conflicts"]) == 1
+
+    conflict = result["conflicts"][0]
+
+    assert conflict["topic"] == "AI employment"
+    assert conflict["claims"] == [
+        "AI creates jobs.",
+        "AI displaces jobs.",
+    ]
+    assert conflict["conflict_type"] == "contextual"
+    assert conflict["severity"] == 0.60
+    assert conflict["confidence"] == 0.90

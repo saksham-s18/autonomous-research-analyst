@@ -17,12 +17,17 @@ def test_research_state_supports_sources_and_evidence() -> None:
         "current_subquestion": "What are the employment effects?",
         "completed_subquestions": [],
         "evidence": [
-            {
-                "subquestion": "What are the employment effects?",
-                "claim": "AI automation can change demand for routine tasks.",
-                "source_url": "https://example.com/report",
-                "relevance": 0.9,
-            }
+    {
+        "subquestion": "What are the employment effects?",
+        "claim": "AI automation can change demand for routine tasks.",
+        "supporting_text": (
+            "AI automation can change demand for routine tasks."
+        ),
+        "source_url": "https://example.com/report",
+        "relevance": 0.9,
+        "confidence": 0.85,
+        "evidence_score": 0.88,
+    }
         ],
         "sources": [
             {
@@ -32,10 +37,13 @@ def test_research_state_supports_sources_and_evidence() -> None:
                 "published_at": "2026-01-01",
             }
         ],
+        "source_failures": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
         "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
         "error": None,
     }
 
@@ -59,6 +67,7 @@ def test_research_state_supports_conflicts() -> None:
         "completed_subquestions": [],
         "evidence": [],
         "sources": [],
+        "source_failures": [],
         "conflicts": [
             {
                 "topic": "Employment",
@@ -67,11 +76,16 @@ def test_research_state_supports_conflicts() -> None:
                     "Automation may displace some workers.",
                 ],
                 "explanation": "The sources emphasize different effects.",
+                "conflict_type": "contextual",
+                "severity": 0.60,
+                "confidence": 0.90,
             }
         ],
         "draft_report": None,
         "final_report": None,
         "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
         "error": None,
     }
 

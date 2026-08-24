@@ -16,6 +16,7 @@ from app.llm.resilient import ResilientLLMClient
 from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.source_failures import classify_source_failure
 from app.tools.source_quality import assess_source_quality
 from app.tools.url_utils import deduplicate_search_results
 
@@ -122,44 +123,82 @@ async def research_node(state: ResearchState) -> ResearchState:
     )
 
     evidence = []
+    source_failures = []
 
     for result in results:
         try:
             content = await fetcher.fetch(result["url"])
 
+        except httpx.HTTPError as exc:
+            error_type, error_message, retryable = (
+                classify_source_failure("fetch", exc)
+            )
+
+            source_failures.append(
+                {
+                    "url": result["url"],
+                    "stage": "fetch",
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "retryable": retryable,
+                }
+            )
+
+            logger.warning(
+                "Failed to fetch source %s: %s",
+                result["url"],
+                error_message,
+            )
+            continue
+
+        try:
             extracted = await evidence_agent.extract(
                 subquestion=current,
                 source_url=result["url"],
                 content=content,
             )
 
-            source_quality = assess_source_quality(result["url"])
+        except RuntimeError as exc:
+            error_type, error_message, retryable = (
+                classify_source_failure("extract", exc)
+            )
 
-            evidence_score = calculate_evidence_score(
-                relevance=extracted.relevance,
-                confidence=extracted.confidence,
-                source_quality=source_quality.score,
-            )  
-
-            evidence.append(
+            source_failures.append(
                 {
-                    "subquestion": current,
-                    "claim": extracted.claim,
-                    "supporting_text": extracted.supporting_text,
-                    "source_url": result["url"],
-                    "relevance": extracted.relevance,
-                    "confidence": extracted.confidence,
-                    "evidence_score": evidence_score,
+                    "url": result["url"],
+                    "stage": "extract",
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "retryable": retryable,
                 }
             )
 
-        except (httpx.HTTPError, RuntimeError) as exc:
             logger.warning(
                 "Failed to extract evidence from %s: %s",
                 result["url"],
-                exc,
+                error_message,
             )
             continue
+
+        source_quality = assess_source_quality(result["url"])
+
+        evidence_score = calculate_evidence_score(
+            relevance=extracted.relevance,
+            confidence=extracted.confidence,
+            source_quality=source_quality.score,
+        )
+
+        evidence.append(
+            {
+                "subquestion": current,
+                "claim": extracted.claim,
+                "supporting_text": extracted.supporting_text,
+                "source_url": result["url"],
+                "relevance": extracted.relevance,
+                "confidence": extracted.confidence,
+                "evidence_score": evidence_score,
+            }
+        )
 
     completed = [
         *state["completed_subquestions"],
@@ -171,6 +210,11 @@ async def research_node(state: ResearchState) -> ResearchState:
         *evidence,
     ]
 
+    all_source_failures = [
+        *state["source_failures"],
+        *source_failures,
+    ]
+
     return {
         **state,
         "status": "researching",
@@ -179,6 +223,7 @@ async def research_node(state: ResearchState) -> ResearchState:
             *state["sources"],
             *sources,
         ],
+        "source_failures": all_source_failures,
         "evidence": rank_evidence(all_evidence),
     }
     

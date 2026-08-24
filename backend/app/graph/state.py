@@ -42,6 +42,17 @@ class Conflict(TypedDict):
     claims: list[str]
     explanation: str
 
+
+class SourceFailure(TypedDict):
+    """A failure encountered while processing a research source."""
+
+    url: str
+    stage: str
+    error_type: str
+    error_message: str
+    retryable: bool
+
+
 class ResearchState(TypedDict):
     """State shared across the autonomous research workflow."""
 
@@ -56,6 +67,7 @@ class ResearchState(TypedDict):
 
     evidence: list[Evidence]
     sources: list[Source]
+    source_failures: list[SourceFailure]
     conflicts: list[Conflict]
 
     draft_report: str | None

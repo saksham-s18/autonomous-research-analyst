@@ -107,6 +107,7 @@ async def test_research_workflow_runs(
         "completed_subquestions": [],
         "evidence": [],
         "sources": [],
+        "source_failures": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -169,8 +170,8 @@ async def test_research_workflow_runs(
     )
 
     assert all(
-    item["evidence_score"] == 0.82
-    for item in result["evidence"]
+        item["evidence_score"] == 0.82
+        for item in result["evidence"]
     )
 
     assert all(
@@ -179,3 +180,92 @@ async def test_research_workflow_runs(
     )
 
     assert result["current_subquestion"] is None
+
+
+@pytest.mark.asyncio
+async def test_research_workflow_handles_evidence_agent_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evidence extraction errors should be caught and recorded."""
+
+    class FailingEvidenceAgent:
+        async def extract(
+            self,
+            subquestion: str,
+            source_url: str,
+            content: str,
+        ) -> EvidenceOutput:
+            raise RuntimeError("Failed to parse evidence")
+
+    monkeypatch.setattr(
+        nodes,
+        "create_planner_agent",
+        lambda: FakePlanner(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_research_agent",
+        lambda: FakeResearchAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "HttpSourceFetcher",
+        FakeFetcher,
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_evidence_agent",
+        lambda: FailingEvidenceAgent(),
+    )
+
+    graph = build_research_graph()
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "pending",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [],
+        "evidence": [],
+        "sources": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "error": None,
+    }
+
+    result = await graph.ainvoke(state)
+
+    assert result["status"] == "synthesizing"
+    assert len(result["sources"]) == 3
+    assert len(result["evidence"]) == 0
+    assert len(result["source_failures"]) == 3
+
+    assert all(
+        failure["stage"] == "extract"
+        for failure in result["source_failures"]
+    )
+
+    assert all(
+        failure["error_type"] == "extraction_error"
+        for failure in result["source_failures"]
+    )
+
+    assert all(
+        failure["retryable"] is True
+        for failure in result["source_failures"]
+    )
+
+    assert all(
+        failure["error_message"] == "Evidence extraction failed."
+        for failure in result["source_failures"]
+    )

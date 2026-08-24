@@ -78,4 +78,7 @@ class ResearchState(TypedDict):
 
     confidence: float | None
 
+    sufficiency_score: float | None
+    sufficiency_reasons: list[str]
+
     error: str | None

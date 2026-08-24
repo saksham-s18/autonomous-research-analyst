@@ -128,6 +128,8 @@ async def test_research_workflow_runs(
         "draft_report": None,
         "final_report": None,
         "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
         "error": None,
     }
 
@@ -198,6 +200,11 @@ async def test_research_workflow_runs(
     assert result["current_subquestion"] is None
 
     assert result["conflicts"] == []
+    assert result["sufficiency_score"] is not None
+    assert result["sufficiency_score"] >= 0.70
+    assert result["sufficiency_reasons"] == [
+        "Evidence meets the sufficiency criteria.",
+    ]
 
 
 @pytest.mark.asyncio
@@ -258,6 +265,8 @@ async def test_research_workflow_handles_evidence_agent_failures(
         "draft_report": None,
         "final_report": None,
         "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
         "error": None,
     }
 
@@ -364,6 +373,8 @@ async def test_synthesis_detects_conflicts(
         "draft_report": None,
         "final_report": None,
         "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
         "error": None,
     }
 
@@ -382,3 +393,42 @@ async def test_synthesis_detects_conflicts(
     assert conflict["conflict_type"] == "contextual"
     assert conflict["severity"] == 0.60
     assert conflict["confidence"] == 0.90
+
+
+@pytest.mark.asyncio
+async def test_synthesis_marks_insufficient_research() -> None:
+    """Synthesis should record insufficient research."""
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "researching",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the employment effects of AI?",
+                "What are the productivity effects of AI?",
+                "What are the risks of AI automation?",
+            ],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [],
+        "evidence": [],
+        "sources": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }
+
+    result = await nodes.synthesis_node(state)
+
+    assert result["sufficiency_score"] == 0.0
+    assert result["sufficiency_reasons"] == [
+        "No evidence was collected.",
+    ]
+    assert result["conflicts"] == []

@@ -17,6 +17,9 @@ from app.llm.resilient import ResilientLLMClient
 from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.research_sufficiency import (
+    evaluate_research_sufficiency,
+)
 from app.tools.source_failures import classify_source_failure
 from app.tools.source_quality import assess_source_quality
 from app.tools.url_utils import deduplicate_search_results
@@ -259,12 +262,23 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
     """Detect evidence conflicts before future report synthesis."""
 
     if len(state["evidence"]) < 2:
+        sufficiency = evaluate_research_sufficiency(
+            evidence=state["evidence"],
+            source_failures=state["source_failures"],
+            expected_subquestions=len(
+                state["research_plan"]["subquestions"]
+            ),
+            conflicts=0,
+        )
+
         return {
             **state,
             "status": "synthesizing",
             "current_subquestion": None,
             "draft_report": None,
             "conflicts": [],
+            "sufficiency_score": sufficiency.score,
+            "sufficiency_reasons": list(sufficiency.reasons),
         }
 
     conflict_agent = create_conflict_agent()
@@ -303,12 +317,23 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
             for conflict in detected
         )
 
+    sufficiency = evaluate_research_sufficiency(
+        evidence=state["evidence"],
+        source_failures=state["source_failures"],
+        expected_subquestions=len(
+            state["research_plan"]["subquestions"]
+        ),
+        conflicts=len(conflicts),
+    )
+
     return {
         **state,
         "status": "synthesizing",
         "current_subquestion": None,
         "draft_report": None,
         "conflicts": conflicts,
+        "sufficiency_score": sufficiency.score,
+        "sufficiency_reasons": list(sufficiency.reasons),
     }
 
 def create_research_agent() -> ResearchAgent:

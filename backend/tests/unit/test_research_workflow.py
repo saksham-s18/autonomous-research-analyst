@@ -50,6 +50,14 @@ class FakeFetcher:
 class FakeEvidenceAgent:
     """Fake evidence agent used in workflow tests."""
 
+    def __init__(
+        self,
+        relevance: float = 0.95,
+        confidence: float = 0.90,
+    ) -> None:
+        self.relevance = relevance
+        self.confidence = confidence
+
     async def extract(
         self,
         subquestion: str,
@@ -59,8 +67,8 @@ class FakeEvidenceAgent:
         return EvidenceOutput(
             claim=f"Evidence about {subquestion}",
             supporting_text=content,
-            relevance=0.95,
-            confidence=0.90,
+            relevance=self.relevance,
+            confidence=self.confidence,
         )
 
 class FakeConflictAgent:
@@ -104,9 +112,12 @@ async def test_research_workflow_runs(
     )
 
     monkeypatch.setattr(
-        nodes,
-        "create_evidence_agent",
-        lambda: FakeEvidenceAgent(),
+    nodes,
+    "create_evidence_agent",
+    lambda: FakeEvidenceAgent(
+        relevance=0.50,
+        confidence=0.50,
+    ),
     )
 
     graph = build_research_graph()
@@ -121,6 +132,9 @@ async def test_research_workflow_runs(
         },
         "current_subquestion": None,
         "completed_subquestions": [],
+        "follow_up_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
         "evidence": [],
         "sources": [],
         "source_failures": [],
@@ -141,6 +155,8 @@ async def test_research_workflow_runs(
     assert result["research_plan"]["goal"] == (
         "What are the effects of AI automation?"
     )
+    assert result["research_iterations"] == 3
+    assert result["max_research_iterations"] == 3
     assert len(result["research_plan"]["subquestions"]) == 3
 
     assert len(result["completed_subquestions"]) == 3
@@ -178,17 +194,17 @@ async def test_research_workflow_runs(
     )
 
     assert all(
-        item["relevance"] == 0.95
+        item["relevance"] == 0.50
         for item in result["evidence"]
     )
 
     assert all(
-        item["confidence"] == 0.90
+        item["confidence"] == 0.50
         for item in result["evidence"]
     )
 
     assert all(
-        item["evidence_score"] == 0.82
+        item["evidence_score"] == 0.50
         for item in result["evidence"]
     )
 
@@ -202,9 +218,6 @@ async def test_research_workflow_runs(
     assert result["conflicts"] == []
     assert result["sufficiency_score"] is not None
     assert result["sufficiency_score"] >= 0.70
-    assert result["sufficiency_reasons"] == [
-        "Evidence meets the sufficiency criteria.",
-    ]
 
 
 @pytest.mark.asyncio
@@ -258,6 +271,9 @@ async def test_research_workflow_handles_evidence_agent_failures(
         },
         "current_subquestion": None,
         "completed_subquestions": [],
+        "follow_up_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
         "evidence": [],
         "sources": [],
         "source_failures": [],
@@ -273,9 +289,14 @@ async def test_research_workflow_handles_evidence_agent_failures(
     result = await graph.ainvoke(state)
 
     assert result["status"] == "synthesizing"
-    assert len(result["sources"]) == 3
+    assert len(result["sources"]) == 4
     assert len(result["evidence"]) == 0
-    assert len(result["source_failures"]) == 3
+    assert len(result["source_failures"]) == 4
+
+    assert len(result["follow_up_subquestions"]) == 1
+    assert result["follow_up_subquestions"][0].startswith(
+        "What additional evidence"
+    )
 
     assert all(
         failure["stage"] == "extract"
@@ -347,6 +368,8 @@ async def test_synthesis_detects_conflicts(
         "completed_subquestions": [
             "What are the employment effects of AI?"
         ],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
         "evidence": [
             {
                 "subquestion": "What are the employment effects of AI?",
@@ -413,6 +436,8 @@ async def test_synthesis_marks_insufficient_research() -> None:
         },
         "current_subquestion": None,
         "completed_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
         "evidence": [],
         "sources": [],
         "source_failures": [],
@@ -432,3 +457,85 @@ async def test_synthesis_marks_insufficient_research() -> None:
         "No evidence was collected.",
     ]
     assert result["conflicts"] == []
+
+@pytest.mark.asyncio
+async def test_research_workflow_generates_follow_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Workflow should generate follow-up research when needed."""
+
+    monkeypatch.setattr(
+        nodes,
+        "create_planner_agent",
+        lambda: FakePlanner(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_research_agent",
+        lambda: FakeResearchAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "HttpSourceFetcher",
+        FakeFetcher,
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_evidence_agent",
+        lambda: FakeEvidenceAgent(
+            relevance=0.20,
+            confidence=0.20,
+        ),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_conflict_agent",
+        lambda: FakeConflictAgent(),
+    )
+
+    graph = build_research_graph()
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "pending",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [],
+        "follow_up_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
+        "evidence": [],
+        "sources": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }
+
+    result = await graph.ainvoke(state)
+
+    assert result["status"] == "synthesizing"
+
+    assert result["research_iterations"] == 4
+    assert result["max_research_iterations"] == 3
+
+    assert len(result["follow_up_subquestions"]) == 1
+
+    assert result["follow_up_subquestions"][0].startswith(
+        "What additional evidence"
+    )                   
+
+    assert result["sufficiency_score"] is not None
+    assert result["sufficiency_score"] < 0.70

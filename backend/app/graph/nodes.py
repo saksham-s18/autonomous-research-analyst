@@ -16,7 +16,9 @@ from app.llm.factory import (
 from app.llm.resilient import ResilientLLMClient
 from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
+from app.tools.follow_up import generate_follow_up_question
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.research_router import decide_research_route
 from app.tools.research_sufficiency import (
     evaluate_research_sufficiency,
 )
@@ -42,6 +44,8 @@ async def planner_node(state: ResearchState) -> ResearchState:
         },
         "current_subquestion": None,
         "completed_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
     }
 
 def create_planner_agent() -> PlannerAgent:
@@ -55,18 +59,32 @@ def create_planner_agent() -> PlannerAgent:
     return PlannerAgent(llm_client)
 
 
-def select_subquestion_node(state: ResearchState) -> ResearchState:
-    """Select the next unanswered research subquestion."""
+def follow_up_node(state: ResearchState) -> ResearchState:
+    """Generate and store an adaptive follow-up research question."""
 
     subquestions = state["research_plan"]["subquestions"]
 
-    remaining = [
-        subquestion
-        for subquestion in subquestions
-        if subquestion not in state["completed_subquestions"]
-    ]
+    sufficiency = evaluate_research_sufficiency(
+        evidence=state["evidence"],
+        source_failures=state["source_failures"],
+        expected_subquestions=len(subquestions),
+        conflicts=len(state["conflicts"]),
+    )
 
-    if not remaining:
+    follow_up = generate_follow_up_question(
+        original_question=state["question"],
+        existing_subquestions=[
+            *subquestions,
+            *state["follow_up_subquestions"],
+        ],
+        sufficiency_reasons=list(sufficiency.reasons),
+        conflict_topics=[
+            conflict["topic"]
+            for conflict in state["conflicts"]
+        ],
+    )
+
+    if follow_up is None:
         return {
             **state,
             "current_subquestion": None,
@@ -74,8 +92,48 @@ def select_subquestion_node(state: ResearchState) -> ResearchState:
 
     return {
         **state,
-        "current_subquestion": remaining[0],
+        "follow_up_subquestions": [
+            *state["follow_up_subquestions"],
+            follow_up.question,
+        ],
+        "current_subquestion": None,
         "status": "researching",
+    }
+
+def select_subquestion_node(state: ResearchState) -> ResearchState:
+    """Select the next unanswered research subquestion."""
+
+    subquestions = state["research_plan"]["subquestions"]
+
+    remaining_planned = [
+        subquestion
+        for subquestion in subquestions
+        if subquestion not in state["completed_subquestions"]
+    ]
+
+    if remaining_planned:
+        return {
+            **state,
+            "current_subquestion": remaining_planned[0],
+            "status": "researching",
+        }
+
+    remaining_follow_ups = [
+        subquestion
+        for subquestion in state["follow_up_subquestions"]
+        if subquestion not in state["completed_subquestions"]
+    ]
+
+    if remaining_follow_ups:
+        return {
+            **state,
+            "current_subquestion": remaining_follow_ups[0],
+            "status": "researching",
+        }
+
+    return {
+        **state,
+        "current_subquestion": None,
     }
 
 def create_evidence_agent() -> EvidenceAgent:
@@ -109,6 +167,8 @@ async def research_node(state: ResearchState) -> ResearchState:
             **state,
             "status": "researching",
         }
+
+    research_iterations = state["research_iterations"] + 1
 
     researcher = create_research_agent()
     fetcher = HttpSourceFetcher()
@@ -234,6 +294,7 @@ async def research_node(state: ResearchState) -> ResearchState:
         **state,
         "status": "researching",
         "completed_subquestions": completed,
+        "research_iterations": research_iterations,
         "sources": [
             *state["sources"],
             *sources,
@@ -243,7 +304,7 @@ async def research_node(state: ResearchState) -> ResearchState:
     }
     
 def route_after_research(state: ResearchState) -> str:
-    """Decide whether another subquestion needs research."""
+    """Decide whether research should continue or synthesis should begin."""
 
     subquestions = state["research_plan"]["subquestions"]
 
@@ -253,10 +314,39 @@ def route_after_research(state: ResearchState) -> str:
         if subquestion not in state["completed_subquestions"]
     ]
 
+    sufficiency = evaluate_research_sufficiency(
+        evidence=state["evidence"],
+        source_failures=state["source_failures"],
+        expected_subquestions=len(subquestions),
+        conflicts=len(state["conflicts"]),
+    )
+
+    decision = decide_research_route(
+        sufficient=sufficiency.sufficient,
+        completed_subquestions=len(
+            state["completed_subquestions"]
+        ),
+        total_subquestions=len(subquestions),
+        research_iterations=state["research_iterations"],
+        max_research_iterations=state["max_research_iterations"],
+        follow_up_questions=len(
+            state["follow_up_subquestions"]
+        ),
+    )
+
+    logger.info(
+        "Research routing decision: route=%s reason=%s",
+        decision.route,
+        decision.reason,
+    )
+
+    if decision.route == "synthesis":
+        return "synthesis"
+
     if remaining:
         return "select_subquestion"
 
-    return "synthesis"
+    return "follow_up"
 
 async def synthesis_node(state: ResearchState) -> ResearchState:
     """Detect evidence conflicts before future report synthesis."""

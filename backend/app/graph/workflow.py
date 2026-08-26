@@ -3,6 +3,7 @@
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.nodes import (
+    follow_up_node,
     planner_node,
     research_node,
     route_after_research,
@@ -20,6 +21,7 @@ def build_research_graph():
     graph.add_node("planner", planner_node)
     graph.add_node("select_subquestion", select_subquestion_node)
     graph.add_node("research", research_node)
+    graph.add_node("follow_up", follow_up_node)
     graph.add_node("synthesis", synthesis_node)
 
     graph.add_edge(START, "planner")
@@ -27,14 +29,16 @@ def build_research_graph():
     graph.add_edge("select_subquestion", "research")
 
     graph.add_conditional_edges(
-        "research",
-        route_after_research,
+    "research",
+    route_after_research,
         {
             "select_subquestion": "select_subquestion",
+            "follow_up": "follow_up",
             "synthesis": "synthesis",
         },
     )
 
+    graph.add_edge("follow_up", "select_subquestion")
     graph.add_edge("synthesis", END)
 
     return graph.compile()

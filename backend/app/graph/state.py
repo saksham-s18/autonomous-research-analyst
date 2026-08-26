@@ -67,6 +67,9 @@ class ResearchState(TypedDict):
 
     current_subquestion: str | None
     completed_subquestions: list[str]
+    follow_up_subquestions: list[str]
+    research_iterations: int
+    max_research_iterations: int
 
     evidence: list[Evidence]
     sources: list[Source]

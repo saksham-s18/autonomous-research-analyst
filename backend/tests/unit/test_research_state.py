@@ -16,6 +16,8 @@ def test_research_state_supports_sources_and_evidence() -> None:
         },
         "current_subquestion": "What are the employment effects?",
         "completed_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
         "evidence": [
     {
         "subquestion": "What are the employment effects?",
@@ -50,6 +52,8 @@ def test_research_state_supports_sources_and_evidence() -> None:
     assert len(state["sources"]) == 1
     assert len(state["evidence"]) == 1
     assert state["evidence"][0]["relevance"] == 0.9
+    assert state["research_iterations"] == 0
+    assert state["max_research_iterations"] == 3
 
 
 def test_research_state_supports_conflicts() -> None:
@@ -65,6 +69,8 @@ def test_research_state_supports_conflicts() -> None:
         },
         "current_subquestion": "What are the employment effects?",
         "completed_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,   
         "evidence": [],
         "sources": [],
         "source_failures": [],

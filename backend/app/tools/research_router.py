@@ -41,8 +41,8 @@ def decide_research_route(
                 reason=(
                     "Maximum research iterations reached after "
                     "follow-up research."
-            ),
-        )
+                ),
+            )
 
         return ResearchRoutingDecision(
             route="research",

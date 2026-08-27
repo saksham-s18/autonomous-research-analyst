@@ -39,6 +39,7 @@ def test_research_state_supports_sources_and_evidence() -> None:
                 "published_at": "2026-01-01",
             }
         ],
+        "citations": [],
         "source_failures": [],
         "conflicts": [],
         "draft_report": None,
@@ -73,6 +74,7 @@ def test_research_state_supports_conflicts() -> None:
         "max_research_iterations": 3,   
         "evidence": [],
         "sources": [],
+        "citations": [],
         "source_failures": [],
         "conflicts": [
             {

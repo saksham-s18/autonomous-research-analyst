@@ -8,16 +8,19 @@ from app.agents.conflict import ConflictAgent
 from app.agents.evidence import EvidenceAgent
 from app.agents.planner import PlannerAgent
 from app.agents.researcher import ResearchAgent
+from app.agents.synthesis import SynthesisAgent
 from app.graph.state import ResearchState
 from app.llm.factory import (
     create_fallback_llm_client,
     create_primary_llm_client,
 )
 from app.llm.resilient import ResilientLLMClient
+from app.tools.citations import build_citations
 from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
 from app.tools.follow_up import generate_follow_up_question
 from app.tools.http_fetcher import HttpSourceFetcher
+from app.tools.report_formatter import format_report_with_citations
 from app.tools.research_router import decide_research_route
 from app.tools.research_sufficiency import (
     evaluate_research_sufficiency,
@@ -147,6 +150,17 @@ def create_evidence_agent() -> EvidenceAgent:
     return EvidenceAgent(llm_client)
 
 
+def create_synthesis_agent() -> SynthesisAgent:
+    """Create the configured synthesis agent."""
+
+    llm_client = ResilientLLMClient(
+        primary=create_primary_llm_client(),
+        fallback=create_fallback_llm_client(),
+    )
+
+    return SynthesisAgent(llm_client)
+
+
 def create_conflict_agent() -> ConflictAgent:
     """Create the configured conflict detection agent."""
 
@@ -194,8 +208,8 @@ async def research_node(state: ResearchState) -> ResearchState:
                 "quality_score": quality.score,
                 "quality_category": quality.category,
                 "quality_reasons": list(quality.reasons),
-        }
-    )
+            }
+        )
 
     evidence = []
     source_failures = []
@@ -361,11 +375,14 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
             conflicts=0,
         )
 
+        citations = build_citations(state["evidence"])
+
         return {
             **state,
             "status": "synthesizing",
             "current_subquestion": None,
             "draft_report": None,
+            "citations": citations,
             "conflicts": [],
             "sufficiency_score": sufficiency.score,
             "sufficiency_reasons": list(sufficiency.reasons),
@@ -386,7 +403,7 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
 
         if len(subquestion_evidence) < 2:
             continue
-
+        
         detected = await conflict_agent.detect(
             subquestion=subquestion,
             evidence=subquestion_evidence,
@@ -415,15 +432,50 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
         ),
         conflicts=len(conflicts),
     )
+    citations = build_citations(state["evidence"])
+
+    synthesis_agent = create_synthesis_agent()
+
+    try:
+        result = await synthesis_agent.synthesize(
+            question=state["question"],
+            evidence=state["evidence"],
+            conflicts=conflicts,
+        )
+    except RuntimeError as exc:
+        logger.warning(
+            "Synthesis generation failed: %s",
+            exc,
+        )
+
+        return {
+            **state,
+            "status": "synthesis_failed",
+            "current_subquestion": None,
+            "draft_report": None,
+            "final_report": None,
+            "confidence": None,
+            "conflicts": conflicts,
+            "citations": citations,
+            "sufficiency_score": sufficiency.score,
+            "sufficiency_reasons": list(sufficiency.reasons),
+            "error": str(exc),
+        }
 
     return {
         **state,
         "status": "synthesizing",
         "current_subquestion": None,
-        "draft_report": None,
+        "draft_report": result.executive_summary,
+        "final_report": format_report_with_citations(
+            result.executive_summary,
+            citations,
+        ),
         "conflicts": conflicts,
+        "citations": citations,
         "sufficiency_score": sufficiency.score,
         "sufficiency_reasons": list(sufficiency.reasons),
+        "confidence": result.confidence,
     }
 
 def create_research_agent() -> ResearchAgent:

@@ -22,6 +22,12 @@ class Source(TypedDict):
     quality_category: str
     quality_reasons: list[str]
 
+class Citation(TypedDict):
+    """A citation used in the final research report."""
+
+    citation_id: int
+    url: str
+
 
 class Evidence(TypedDict):
     """Evidence extracted from a research source."""
@@ -73,6 +79,7 @@ class ResearchState(TypedDict):
 
     evidence: list[Evidence]
     sources: list[Source]
+    citations: list[Citation]
     source_failures: list[SourceFailure]
     conflicts: list[Conflict]
 

@@ -93,7 +93,10 @@ class FakeSynthesisAgent:
             title="Effects of AI Automation",
             executive_summary="Synthesized research report.",
             key_findings=[
-                "AI automation affects employment.",
+                {
+                    "claim": "AI automation affects employment.",
+                    "evidence_ids": ["E1"],
+                },
             ],
             detailed_analysis=(
                 "AI automation can change employment patterns."
@@ -207,6 +210,14 @@ async def test_research_workflow_runs(
     assert len(result["completed_subquestions"]) == 3
     assert len(result["sources"]) == 3
     assert len(result["evidence"]) == 3
+
+    evidence_ids = {
+        item["evidence_id"]
+        for item in result["evidence"]
+    }
+
+    assert evidence_ids == {"E1", "E2", "E3"}
+    assert len(evidence_ids) == len(result["evidence"])
 
     assert all(
         source["quality_score"] == 0.50
@@ -406,6 +417,12 @@ async def test_synthesis_detects_conflicts(
         lambda: ConflictProducingAgent(),
     )
 
+    monkeypatch.setattr(
+        nodes,
+        "create_synthesis_agent",
+        lambda: FakeSynthesisAgent(),
+    )
+
     state = {
         "research_id": uuid4(),
         "question": "What are the effects of AI automation?",
@@ -424,6 +441,7 @@ async def test_synthesis_detects_conflicts(
         "max_research_iterations": 3,
         "evidence": [
             {
+                "evidence_id": "E1",
                 "subquestion": "What are the employment effects of AI?",
                 "claim": "AI creates jobs.",
                 "supporting_text": "New AI roles are emerging.",
@@ -433,6 +451,7 @@ async def test_synthesis_detects_conflicts(
                 "evidence_score": 0.90,
             },
             {
+                "evidence_id": "E2",
                 "subquestion": "What are the employment effects of AI?",
                 "claim": "AI displaces jobs.",
                 "supporting_text": "Some existing roles are automated.",
@@ -592,6 +611,8 @@ async def test_research_workflow_generates_follow_up(
     assert result["draft_report"] == "Synthesized research report."
     assert result["final_report"] == (
         "Synthesized research report."
+        "\n\nKey Findings:\n"
+        "1. AI automation affects employment. [1]"
         "\n\nSources:\n"
         "[1] https://example.com/source\n"
         "[2] https://example.com/source2"
@@ -659,6 +680,7 @@ async def test_synthesis_node_persists_generated_report(
         "max_research_iterations": 3,
         "evidence": [
             {
+                "evidence_id": "E1",
                 "subquestion": "What are the employment effects?",
                 "claim": "AI can automate routine tasks.",
                 "supporting_text": (
@@ -670,6 +692,7 @@ async def test_synthesis_node_persists_generated_report(
                 "evidence_score": 0.87,
             },
             {
+                "evidence_id": "E2",
                 "subquestion": "What are the employment effects?",
                 "claim": "AI can create new jobs.",
                 "supporting_text": (
@@ -698,7 +721,9 @@ async def test_synthesis_node_persists_generated_report(
     assert result["status"] == "synthesizing"
     assert result["draft_report"] == "Synthesized research report."
     assert result["final_report"] == (
-        "Synthesized research report."
+    "Synthesized research report."
+        "\n\nKey Findings:\n"
+        "1. AI automation affects employment. [1]"
         "\n\nSources:\n"
         "[1] https://example.com/source\n"
         "[2] https://example.com/source2"
@@ -727,6 +752,8 @@ async def test_synthesis_node_handles_synthesis_agent_failure(
         "create_conflict_agent",
         lambda: FakeConflictAgent(),
     )
+
+
 
     monkeypatch.setattr(
         nodes,

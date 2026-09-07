@@ -5,6 +5,13 @@ from pydantic import BaseModel, Field
 from app.llm.client import LLMClient
 
 
+class ResearchFinding(BaseModel):
+    """A synthesized claim linked to supporting evidence."""
+
+    claim: str = Field(min_length=1, max_length=2000)
+    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+
+
 class SynthesisOutput(BaseModel):
     """Structured research report generated from evidence."""
 
@@ -18,7 +25,7 @@ class SynthesisOutput(BaseModel):
         max_length=5000,
     )
 
-    key_findings: list[str] = Field(
+    key_findings: list[ResearchFinding] = Field(
         min_length=1,
         max_length=10,
     )
@@ -95,6 +102,10 @@ class SynthesisAgent:
             "- Create a clear, specific title.\n"
             "- Write an executive summary of the overall answer.\n"
             "- List the most important evidence-backed key findings.\n"
+            "- Each key finding must contain a claim and one or more "
+            "supporting evidence IDs.\n"
+            "- Use only evidence IDs that appear in the provided evidence.\n"
+            "- Do not invent, modify, or guess evidence IDs.\n"
             "- Provide a detailed analysis connecting the evidence "
             "to the research question.\n"
             "- Clearly describe conflicting evidence when present. "
@@ -105,13 +116,30 @@ class SynthesisAgent:
             "- Assign a confidence score between 0 and 1 based on the "
             "quality, relevance, and consistency of the evidence.\n\n"
             "Use only information supported by the provided evidence.\n"
-            "Do not invent facts, sources, or citations.\n"
+            "Do not invent facts, sources, citations, or evidence IDs.\n"
             "Clearly distinguish conflicting evidence instead of "
             "silently choosing one claim.\n"
             "Return content suitable for a professional research report."
         )
 
-        return await self.llm_client.generate_structured(
+        result = await self.llm_client.generate_structured(
             prompt,
             SynthesisOutput,
         )
+
+        valid_evidence_ids = {
+            item["evidence_id"]
+            for item in evidence
+            if "evidence_id" in item
+        }
+
+        for finding in result.key_findings:
+            invalid_ids = set(finding.evidence_ids) - valid_evidence_ids
+
+            if invalid_ids:
+                raise ValueError(
+                    "Synthesis referenced unknown evidence IDs: "
+                    f"{sorted(invalid_ids)}"
+                )
+
+        return result

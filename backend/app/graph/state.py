@@ -22,6 +22,7 @@ class Source(TypedDict):
     quality_category: str
     quality_reasons: list[str]
 
+
 class Citation(TypedDict):
     """A citation used in the final research report."""
 
@@ -32,6 +33,7 @@ class Citation(TypedDict):
 class Evidence(TypedDict):
     """Evidence extracted from a research source."""
 
+    evidence_id: str
     subquestion: str
     claim: str
     supporting_text: str
@@ -39,6 +41,13 @@ class Evidence(TypedDict):
     relevance: float
     confidence: float
     evidence_score: float
+
+
+class ResearchFinding(TypedDict):
+    """A synthesized finding linked to supporting evidence."""
+
+    claim: str
+    evidence_ids: list[str]
 
 
 class Conflict(TypedDict):

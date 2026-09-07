@@ -15,7 +15,10 @@ from app.llm.factory import (
     create_primary_llm_client,
 )
 from app.llm.resilient import ResilientLLMClient
-from app.tools.citations import build_citations
+from app.tools.citations import (
+    build_citations,
+    map_findings_to_citations,
+)
 from app.tools.evidence_ranking import calculate_evidence_score, rank_evidence
 from app.tools.factory import create_search_tool
 from app.tools.follow_up import generate_follow_up_question
@@ -30,6 +33,7 @@ from app.tools.source_quality import assess_source_quality
 from app.tools.url_utils import deduplicate_search_results
 
 logger = logging.getLogger(__name__)
+
 
 async def planner_node(state: ResearchState) -> ResearchState:
     """Generate a research plan using the planner agent."""
@@ -50,6 +54,7 @@ async def planner_node(state: ResearchState) -> ResearchState:
         "research_iterations": 0,
         "max_research_iterations": 3,
     }
+
 
 def create_planner_agent() -> PlannerAgent:
     """Create the configured planner agent."""
@@ -103,6 +108,7 @@ def follow_up_node(state: ResearchState) -> ResearchState:
         "status": "researching",
     }
 
+
 def select_subquestion_node(state: ResearchState) -> ResearchState:
     """Select the next unanswered research subquestion."""
 
@@ -139,6 +145,7 @@ def select_subquestion_node(state: ResearchState) -> ResearchState:
         "current_subquestion": None,
     }
 
+
 def create_evidence_agent() -> EvidenceAgent:
     """Create the configured evidence extraction agent."""
 
@@ -170,6 +177,7 @@ def create_conflict_agent() -> ConflictAgent:
     )
 
     return ConflictAgent(llm_client)
+
 
 async def research_node(state: ResearchState) -> ResearchState:
     """Research the current subquestion and extract evidence."""
@@ -279,6 +287,7 @@ async def research_node(state: ResearchState) -> ResearchState:
 
         evidence.append(
             {
+                "evidence_id": f"E{len(state['evidence']) + len(evidence) + 1}",
                 "subquestion": current,
                 "claim": extracted.claim,
                 "supporting_text": extracted.supporting_text,
@@ -316,7 +325,8 @@ async def research_node(state: ResearchState) -> ResearchState:
         "source_failures": all_source_failures,
         "evidence": rank_evidence(all_evidence),
     }
-    
+
+
 def route_after_research(state: ResearchState) -> str:
     """Decide whether research should continue or synthesis should begin."""
 
@@ -362,8 +372,9 @@ def route_after_research(state: ResearchState) -> str:
 
     return "follow_up"
 
+
 async def synthesis_node(state: ResearchState) -> ResearchState:
-    """Detect evidence conflicts before future report synthesis."""
+    """Detect conflicts, synthesize findings, and build citations."""
 
     if len(state["evidence"]) < 2:
         sufficiency = evaluate_research_sufficiency(
@@ -383,6 +394,7 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
             "current_subquestion": None,
             "draft_report": None,
             "citations": citations,
+            "finding_citations": [],
             "conflicts": [],
             "sufficiency_score": sufficiency.score,
             "sufficiency_reasons": list(sufficiency.reasons),
@@ -462,6 +474,15 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
             "error": str(exc),
         }
 
+    finding_citations = map_findings_to_citations(
+        [
+            finding.model_dump()
+            for finding in result.key_findings
+        ],
+        state["evidence"],
+        citations,
+    )
+
     return {
         **state,
         "status": "synthesizing",
@@ -470,13 +491,20 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
         "final_report": format_report_with_citations(
             result.executive_summary,
             citations,
+            finding_citations,
+            [
+                finding.claim
+                for finding in result.key_findings
+            ],
         ),
         "conflicts": conflicts,
         "citations": citations,
+        "finding_citations": finding_citations,
         "sufficiency_score": sufficiency.score,
         "sufficiency_reasons": list(sufficiency.reasons),
         "confidence": result.confidence,
     }
+
 
 def create_research_agent() -> ResearchAgent:
     """Create the configured research agent."""

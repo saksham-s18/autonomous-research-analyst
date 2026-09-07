@@ -14,6 +14,30 @@ jobs:
     name: Run tests
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_DB: research_analyst
+          POSTGRES_USER: research_user
+          POSTGRES_PASSWORD: research_password
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U research_user -d research_analyst"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://research_user:research_password@localhost:5433/research_analyst
+      REDIS_URL: redis://localhost:6379/0
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

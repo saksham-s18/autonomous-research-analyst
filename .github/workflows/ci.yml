@@ -54,6 +54,10 @@ jobs:
           pip install -e .
           pip install pytest pytest-asyncio
 
+      - name: Run database migrations
+        working-directory: backend
+        run: alembic upgrade head
+
       - name: Run test suite
         working-directory: backend
         run: pytest

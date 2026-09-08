@@ -101,3 +101,36 @@ class ResearchState(TypedDict):
     sufficiency_reasons: list[str]
 
     error: str | None
+
+
+def create_initial_research_state(
+    research_id: UUID,
+    question: str,
+) -> ResearchState:
+    """Create the initial state for a research workflow."""
+
+    return {
+        "research_id": research_id,
+        "question": question,
+        "status": "pending",
+        "research_plan": {
+            "goal": question,
+            "subquestions": [],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [],
+        "follow_up_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
+        "evidence": [],
+        "sources": [],
+        "citations": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }

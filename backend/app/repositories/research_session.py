@@ -28,6 +28,49 @@ class ResearchSessionRepository:
 
         return research_session
 
+    async def save_result(
+        self,
+        research_id: UUID,
+        *,
+        status: str,
+        research_plan: dict | None,
+        sources: list | None,
+        evidence: list | None,
+        findings: list | None,
+        citations: list | None,
+        finding_citations: list | None,
+        conflicts: list | None,
+        sufficiency_score: float | None,
+        sufficiency_reasons: list | None,
+        confidence: float | None,
+        final_report: str | None,
+    ) -> ResearchSession | None:
+        """Persist the result of a research workflow."""
+
+        research_session = await self.get_by_id(research_id)
+
+        if research_session is None:
+            return None
+
+        research_session.status = status
+        research_session.research_plan = research_plan
+        research_session.sources = sources
+        research_session.evidence = evidence
+        research_session.findings = findings
+        research_session.citations = citations
+        research_session.finding_citations = finding_citations
+        research_session.conflicts = conflicts
+        research_session.sufficiency_score = sufficiency_score
+        research_session.sufficiency_reasons = sufficiency_reasons
+        research_session.confidence = confidence
+        research_session.final_report = final_report
+
+        await self.session.commit()
+        await self.session.refresh(research_session)
+
+        return research_session
+
+
     async def get_by_id(
         self,
         research_id: UUID,

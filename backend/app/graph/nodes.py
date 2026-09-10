@@ -196,31 +196,43 @@ async def research_node(state: ResearchState) -> ResearchState:
     fetcher = HttpSourceFetcher()
     evidence_agent = create_evidence_agent()
 
-    results = await researcher.research(
-        current,
-        max_results=5,
-    )
-
-    results = deduplicate_search_results(results)
     sources = []
-    
+
+    if state["retry_urls"]:
+        results = [
+            {
+                "title": "Retry source",
+                "url": url,
+                "snippet": "",
+            }
+            for url in state["retry_urls"]
+        ]
+    else:
+        results = await researcher.research(
+            current,
+            max_results=5,
+        )
+        results = deduplicate_search_results(results)
+
     for result in results:
         quality = assess_source_quality(result["url"])
 
-        sources.append(
-            {
-                "title": result["title"],
-                "url": result["url"],
-                "publisher": None,
-                "published_at": None,
-                "quality_score": quality.score,
-                "quality_category": quality.category,
-                "quality_reasons": list(quality.reasons),
-            }
-        )
+        if not state["retry_urls"]:
+            sources.append(
+                {
+                    "title": result["title"],
+                    "url": result["url"],
+                    "publisher": None,
+                    "published_at": None,
+                    "quality_score": quality.score,
+                    "quality_category": quality.category,
+                    "quality_reasons": list(quality.reasons),
+                }
+            )
 
     evidence = []
     source_failures = []
+    successful_retry_urls = set()
 
     for result in results:
         try:
@@ -277,6 +289,9 @@ async def research_node(state: ResearchState) -> ResearchState:
             )
             continue
 
+        if result["url"] in state["retry_urls"]:
+            successful_retry_urls.add(result["url"])
+
         source_quality = assess_source_quality(result["url"])
 
         evidence_score = calculate_evidence_score(
@@ -298,20 +313,39 @@ async def research_node(state: ResearchState) -> ResearchState:
             }
         )
 
-    completed = [
-        *state["completed_subquestions"],
-        current,
-    ]
+    completed = list(state["completed_subquestions"])
+
+    if current not in completed:
+        completed.append(current)
 
     all_evidence = [
         *state["evidence"],
         *evidence,
     ]
 
-    all_source_failures = [
-        *state["source_failures"],
-        *source_failures,
-    ]
+    if state["retry_urls"]:
+        all_source_failures = list(state["source_failures"])
+    else:
+        all_source_failures = [
+            *state["source_failures"],
+            *source_failures,
+        ]
+
+    if research_iterations >= state["max_research_iterations"]:
+        remaining_retry_urls = []
+    else:
+        remaining_retry_urls = [
+            url
+            for url in state["retry_urls"]
+            if url not in successful_retry_urls
+        ]
+
+        remaining_retry_urls.extend(
+            failure["url"]
+            for failure in source_failures
+            if failure["retryable"]
+            and failure["url"] not in remaining_retry_urls
+        )
 
     return {
         **state,
@@ -323,12 +357,19 @@ async def research_node(state: ResearchState) -> ResearchState:
             *sources,
         ],
         "source_failures": all_source_failures,
+        "retry_urls": remaining_retry_urls,
         "evidence": rank_evidence(all_evidence),
     }
 
 
 def route_after_research(state: ResearchState) -> str:
     """Decide whether research should continue or synthesis should begin."""
+
+    if (
+        state["retry_urls"]
+        and state["research_iterations"] < state["max_research_iterations"]
+    ):
+        return "retry"
 
     subquestions = state["research_plan"]["subquestions"]
 
@@ -415,7 +456,7 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
 
         if len(subquestion_evidence) < 2:
             continue
-        
+
         detected = await conflict_agent.detect(
             subquestion=subquestion,
             evidence=subquestion_evidence,

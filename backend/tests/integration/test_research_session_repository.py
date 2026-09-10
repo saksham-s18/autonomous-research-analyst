@@ -183,3 +183,51 @@ async def test_save_research_result(
     )
 
     await repository.delete(created.id)
+
+
+@pytest.mark.asyncio
+async def test_save_and_get_research_checkpoint(
+    db_session: AsyncSession,
+) -> None:
+    repository = ResearchSessionRepository(db_session)
+
+    created = await repository.create(
+        "How does AI affect software engineering jobs?"
+    )
+
+    workflow_state = {
+        "research_id": str(created.id),
+        "question": created.question,
+        "status": "researching",
+        "current_subquestion": "What jobs are affected?",
+        "completed_subquestions": [
+            "What is the current state of AI adoption?"
+        ],
+        "follow_up_subquestions": [],
+        "research_iterations": 1,
+        "max_research_iterations": 3,
+        "evidence": [],
+        "sources": [],
+        "source_failures": [],
+        "conflicts": [],
+        "error": None,
+    }
+
+    saved = await repository.save_checkpoint(
+        created.id,
+        workflow_state,
+    )
+
+    assert saved is not None
+    assert saved.workflow_state == workflow_state
+
+    checkpoint = await repository.get_checkpoint(created.id)
+
+    assert checkpoint == workflow_state
+    assert checkpoint["status"] == "researching"
+    assert checkpoint["current_subquestion"] == (
+        "What jobs are affected?"
+    )
+    assert checkpoint["research_iterations"] == 1
+
+    await repository.delete(created.id)

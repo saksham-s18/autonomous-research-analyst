@@ -186,6 +186,7 @@ async def test_research_workflow_runs(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -340,6 +341,7 @@ async def test_research_workflow_handles_evidence_agent_failures(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -464,6 +466,7 @@ async def test_synthesis_detects_conflicts(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -514,6 +517,7 @@ async def test_synthesis_marks_insufficient_research() -> None:
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -595,6 +599,7 @@ async def test_research_workflow_generates_follow_up(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -637,7 +642,7 @@ async def test_research_workflow_generates_follow_up(
 
     assert result["follow_up_subquestions"][0].startswith(
         "What additional evidence"
-    )                   
+    )
 
     assert result["sufficiency_score"] is not None
     assert result["sufficiency_score"] < 0.70
@@ -707,6 +712,7 @@ async def test_synthesis_node_persists_generated_report(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -805,6 +811,7 @@ async def test_synthesis_node_handles_synthesis_agent_failure(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,
@@ -824,3 +831,234 @@ async def test_synthesis_node_handles_synthesis_agent_failure(
     assert result["current_subquestion"] is None
     assert result["conflicts"] is not None
     assert result["sufficiency_score"] is not None
+
+
+@pytest.mark.asyncio
+async def test_research_workflow_resumes_from_completed_subquestions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resumed research should skip planning and continue from progress."""
+
+    planner_called = False
+
+    class FailingPlanner:
+        async def create_plan(
+            self,
+            question: str,
+        ) -> ResearchPlanOutput:
+            nonlocal planner_called
+            planner_called = True
+            raise AssertionError(
+                "Planner should not run when resuming research."
+            )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_planner_agent",
+        lambda: FailingPlanner(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_research_agent",
+        lambda: FakeResearchAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "HttpSourceFetcher",
+        FakeFetcher,
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_evidence_agent",
+        lambda: FakeEvidenceAgent(
+            relevance=0.95,
+            confidence=0.90,
+        ),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_conflict_agent",
+        lambda: FakeConflictAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_synthesis_agent",
+        lambda: FakeSynthesisAgent(),
+    )
+
+    graph = build_research_graph()
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "researching",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the main aspects?",
+                "What evidence exists?",
+                "What are the benefits and risks?",
+            ],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [
+            "What are the main aspects?",
+        ],
+        "follow_up_subquestions": [],
+        "research_iterations": 1,
+        "max_research_iterations": 3,
+        "evidence": [
+            {
+                "evidence_id": "E1",
+                "subquestion": "What are the main aspects?",
+                "claim": "Existing evidence about the main aspects.",
+                "supporting_text": "Previously collected evidence.",
+                "source_url": "https://example.com/source",
+                "relevance": 0.95,
+                "confidence": 0.90,
+                "evidence_score": 0.93,
+            }
+        ],
+        "sources": [
+            {
+                "title": "Previous source",
+                "url": "https://example.com/source",
+                "publisher": None,
+                "published_at": None,
+                "quality_score": 0.50,
+                "quality_category": "general_web",
+                "quality_reasons": ["General web source."],
+            }
+        ],
+        "citations": [],
+        "source_failures": [],
+        "retry_urls": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }
+
+    result = await graph.ainvoke(state)
+
+    assert planner_called is False
+
+    assert result["research_plan"]["subquestions"] == [
+        "What are the main aspects?",
+        "What evidence exists?",
+        "What are the benefits and risks?",
+    ]
+
+    assert "What are the main aspects?" in result["completed_subquestions"]
+
+    assert len(result["completed_subquestions"]) == 2
+    assert result["research_iterations"] == 2
+    assert len(result["evidence"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_research_workflow_retries_failed_source_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retryable source failures should be retried and recover successfully."""
+
+    class FlakyEvidenceAgent:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        async def extract(
+            self,
+            subquestion: str,
+            source_url: str,
+            content: str,
+        ) -> EvidenceOutput:
+            self.attempts += 1
+
+            if self.attempts == 1:
+                raise RuntimeError("Temporary extraction failure")
+
+            return EvidenceOutput(
+                claim="AI automation can improve productivity.",
+                supporting_text="Automation can improve productivity by reducing repetitive work.",
+                relevance=0.9,
+                confidence=0.9,
+            )
+
+    evidence_agent = FlakyEvidenceAgent()
+
+    monkeypatch.setattr(
+        nodes,
+        "create_planner_agent",
+        lambda: FakePlanner(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_research_agent",
+        lambda: FakeResearchAgent(),
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "HttpSourceFetcher",
+        FakeFetcher,
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_evidence_agent",
+        lambda: evidence_agent,
+    )
+
+    monkeypatch.setattr(
+        nodes,
+        "create_synthesis_agent",
+        lambda: FakeSynthesisAgent(),
+    )
+
+    graph = build_research_graph()
+
+    state = {
+        "research_id": uuid4(),
+        "question": "What are the effects of AI automation?",
+        "status": "pending",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the main aspects?",
+            ],
+        },
+        "current_subquestion": "What are the main aspects?",
+        "completed_subquestions": [],
+        "follow_up_subquestions": [],
+        "research_iterations": 0,
+        "max_research_iterations": 3,
+        "evidence": [],
+        "sources": [],
+        "citations": [],
+        "source_failures": [],
+        "retry_urls": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }
+
+    result = await graph.ainvoke(state)
+
+    assert result["research_iterations"] >= 2
+    assert len(result["evidence"]) >= 1
+    assert evidence_agent.attempts >= 2
+    assert result["retry_urls"] == []
+    assert len(result["sources"]) >= 1

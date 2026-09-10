@@ -13,6 +13,13 @@ from app.graph.nodes import (
 from app.graph.state import ResearchState
 
 
+def route_workflow_entry(state: ResearchState) -> str:
+    """Route new research to planning and resumed research to progress."""
+    if state["completed_subquestions"]:
+        return "select_subquestion"
+
+    return "planner"
+
 def build_research_graph():
     """Build the research workflow graph."""
 
@@ -24,7 +31,14 @@ def build_research_graph():
     graph.add_node("follow_up", follow_up_node)
     graph.add_node("synthesis", synthesis_node)
 
-    graph.add_edge(START, "planner")
+    graph.add_conditional_edges(
+        START,
+        route_workflow_entry,
+        {
+            "planner": "planner",
+            "select_subquestion": "select_subquestion",
+        },
+    )
     graph.add_edge("planner", "select_subquestion")
     graph.add_edge("select_subquestion", "research")
 
@@ -35,7 +49,8 @@ def build_research_graph():
             "select_subquestion": "select_subquestion",
             "follow_up": "follow_up",
             "synthesis": "synthesis",
-        },
+            "retry": "research",
+        }
     )
 
     graph.add_edge("follow_up", "select_subquestion")

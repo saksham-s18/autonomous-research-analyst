@@ -1,3 +1,4 @@
+from app.models import research_session
 from unittest.mock import AsyncMock
 
 import pytest
@@ -152,7 +153,7 @@ async def test_run_research_persists_workflow_result(
     }
 
     class FakeGraph:
-        async def ainvoke(self, initial_state):
+        async def astream(self, initial_state, stream_mode):
             assert initial_state["research_id"] == research_session.id
             assert initial_state["question"] == (
                 "What are the effects of AI automation?"
@@ -160,8 +161,15 @@ async def test_run_research_persists_workflow_result(
             assert initial_state["status"] == "pending"
             assert initial_state["evidence"] == []
             assert initial_state["sources"] == []
+            assert stream_mode == "values"
 
-            return expected_result
+            yield {
+                **initial_state,
+                "status": "researching",
+                "current_subquestion": "What are the main effects?",
+            }
+
+            yield expected_result
 
     monkeypatch.setattr(
         service,
@@ -193,4 +201,202 @@ async def test_run_research_persists_workflow_result(
         sufficiency_reasons=[],
         confidence=0.90,
         final_report="Research report",
+    )
+
+    assert repository.save_checkpoint.await_count == 2
+
+    first_checkpoint = repository.save_checkpoint.await_args_list[0].args[1]
+    second_checkpoint = repository.save_checkpoint.await_args_list[1].args[1]
+
+    assert first_checkpoint["status"] == "researching"
+    assert first_checkpoint["current_subquestion"] == (
+        "What are the main effects?"
+    )
+
+    assert second_checkpoint == expected_result
+
+    assert all(
+        call.args[0] == research_session.id
+        for call in repository.save_checkpoint.await_args_list
+    )
+
+@pytest.mark.asyncio
+async def test_save_research_checkpoint() -> None:
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_id = ResearchSession(
+        question="How does AI affect software engineering jobs?"
+    ).id
+
+    workflow_state = {
+        "research_id": str(research_id),
+        "question": "How does AI affect software engineering jobs?",
+        "status": "researching",
+        "current_subquestion": "What jobs are affected?",
+        "completed_subquestions": [
+            "What is the current state of AI adoption?"
+        ],
+        "research_iterations": 1,
+    }
+
+    expected = ResearchSession(
+        question="How does AI affect software engineering jobs?",
+        status="researching",
+    )
+    expected.workflow_state = workflow_state
+
+    repository.save_checkpoint.return_value = expected
+
+    result = await service.save_research_checkpoint(
+        research_id,
+        workflow_state,
+    )
+
+    assert result is expected
+
+    repository.save_checkpoint.assert_awaited_once_with(
+        research_id,
+        workflow_state,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_research_checkpoint() -> None:
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_id = ResearchSession(
+        question="How does AI affect software engineering jobs?"
+    ).id
+
+    workflow_state = {
+        "research_id": str(research_id),
+        "question": "How does AI affect software engineering jobs?",
+        "status": "researching",
+        "current_subquestion": "What jobs are affected?",
+        "completed_subquestions": [
+            "What is the current state of AI adoption?"
+        ],
+        "research_iterations": 1,
+    }
+
+    repository.get_checkpoint.return_value = workflow_state
+
+    result = await service.get_research_checkpoint(research_id)
+
+    assert result == workflow_state
+
+    repository.get_checkpoint.assert_awaited_once_with(research_id)
+
+
+@pytest.mark.asyncio
+async def test_resume_research_uses_saved_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_session = ResearchSession(
+        question="What are the effects of AI automation?",
+        status="researching",
+    )
+
+    checkpoint = {
+        "research_id": research_session.id,
+        "question": "What are the effects of AI automation?",
+        "status": "researching",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the main aspects?",
+                "What evidence exists?",
+            ],
+        },
+        "current_subquestion": None,
+        "completed_subquestions": [
+            "What are the main aspects?",
+        ],
+        "follow_up_subquestions": [],
+        "research_iterations": 1,
+        "max_research_iterations": 3,
+        "evidence": [],
+        "sources": [],
+        "citations": [],
+        "source_failures": [],
+        "conflicts": [],
+        "draft_report": None,
+        "final_report": None,
+        "confidence": None,
+        "sufficiency_score": None,
+        "sufficiency_reasons": [],
+        "error": None,
+    }
+
+    expected_result = {
+        **checkpoint,
+        "status": "synthesizing",
+        "completed_subquestions": [
+            "What are the main aspects?",
+            "What evidence exists?",
+        ],
+        "research_iterations": 2,
+        "final_report": "Resumed research report",
+        "confidence": 0.90,
+    }
+
+    repository.get_by_id.return_value = research_session
+    repository.get_checkpoint.return_value = checkpoint
+
+    saved_session = ResearchSession(
+        question="What are the effects of AI automation?",
+        status="synthesizing",
+        final_report="Resumed research report",
+    )
+    repository.save_result.return_value = saved_session
+
+    class FakeGraph:
+        async def astream(self, initial_state, stream_mode):
+            assert initial_state == checkpoint
+            assert stream_mode == "values"
+
+            yield expected_result
+
+    monkeypatch.setattr(
+        service,
+        "_build_research_graph",
+        lambda: FakeGraph(),
+    )
+
+    result = await service.resume_research(research_session.id)
+
+    assert result is saved_session
+
+    repository.get_by_id.assert_awaited_once_with(
+        research_session.id,
+    )
+
+    repository.get_checkpoint.assert_awaited_once_with(
+        research_session.id,
+    )
+
+    repository.save_checkpoint.assert_awaited_once_with(
+        research_session.id,
+        expected_result,
+    )
+
+    repository.save_result.assert_awaited_once_with(
+        research_session.id,
+        status="synthesizing",
+        research_plan=checkpoint["research_plan"],
+        sources=[],
+        evidence=[],
+        findings=None,
+        citations=[],
+        finding_citations=None,
+        conflicts=[],
+        sufficiency_score=None,
+        sufficiency_reasons=[],
+        confidence=0.90,
+        final_report="Resumed research report",
     )

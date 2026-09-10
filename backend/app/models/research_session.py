@@ -27,6 +27,11 @@ class ResearchSession(Base):
         default="pending",
     )
 
+    workflow_state: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
     research_plan: Mapped[dict | None] = mapped_column(
         JSONB,
         nullable=True,

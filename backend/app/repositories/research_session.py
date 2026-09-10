@@ -71,6 +71,39 @@ class ResearchSessionRepository:
         return research_session
 
 
+    async def save_checkpoint(
+        self,
+        research_id: UUID,
+        workflow_state: dict,
+    ) -> ResearchSession | None:
+        """Persist the current workflow state for a research session."""
+
+        research_session = await self.get_by_id(research_id)
+
+        if research_session is None:
+            return None
+
+        research_session.workflow_state = workflow_state
+
+        await self.session.commit()
+        await self.session.refresh(research_session)
+
+        return research_session
+
+
+    async def get_checkpoint(
+        self,
+        research_id: UUID,
+    ) -> dict | None:
+        """Return the persisted workflow state for a research session."""
+
+        research_session = await self.get_by_id(research_id)
+
+        if research_session is None:
+            return None
+
+        return research_session.workflow_state
+
     async def get_by_id(
         self,
         research_id: UUID,

@@ -45,10 +45,76 @@ class ResearchService:
         )
 
         graph = self._build_research_graph()
-        result = await graph.ainvoke(initial_state)
+
+        result = None
+
+        async for state in graph.astream(
+            initial_state,
+            stream_mode="values",
+        ):
+            result = state
+
+            await self.save_research_checkpoint(
+                research_session.id,
+                dict(state),
+            )
+
+        if result is None:
+            return None
 
         return await self.save_research_result(
             research_session.id,
+            status=result["status"],
+            research_plan=result["research_plan"],
+            sources=result["sources"],
+            evidence=result["evidence"],
+            findings=result.get("findings"),
+            citations=result["citations"],
+            finding_citations=result.get("finding_citations"),
+            conflicts=result["conflicts"],
+            sufficiency_score=result["sufficiency_score"],
+            sufficiency_reasons=result["sufficiency_reasons"],
+            confidence=result["confidence"],
+            final_report=result["final_report"],
+        )
+
+
+    async def resume_research(
+        self,
+        research_id: UUID,
+    ) -> ResearchSession | None:
+        """Resume a research workflow from its latest persisted checkpoint."""
+
+        research_session = await self.get_research_session(research_id)
+
+        if research_session is None:
+            return None
+
+        checkpoint = await self.get_research_checkpoint(research_id)
+
+        if checkpoint is None:
+            return research_session
+
+        graph = self._build_research_graph()
+
+        result = None
+
+        async for state in graph.astream(
+            checkpoint,
+            stream_mode="values",
+        ):
+            result = state
+
+            await self.save_research_checkpoint(
+                research_id,
+                dict(state),
+            )
+
+        if result is None:
+            return research_session
+
+        return await self.save_research_result(
+            research_id,
             status=result["status"],
             research_plan=result["research_plan"],
             sources=result["sources"],
@@ -97,6 +163,27 @@ class ResearchService:
             confidence=confidence,
             final_report=final_report,
         )
+
+
+    async def save_research_checkpoint(
+        self,
+        research_id: UUID,
+        workflow_state: dict,
+    ) -> ResearchSession | None:
+        """Persist the current workflow state for a research session."""
+
+        return await self.repository.save_checkpoint(
+            research_id,
+            workflow_state,
+        )
+
+    async def get_research_checkpoint(
+        self,
+        research_id: UUID,
+    ) -> dict | None:
+        """Retrieve the persisted workflow state for a research session."""
+
+        return await self.repository.get_checkpoint(research_id)
 
     async def get_research_session(
         self,

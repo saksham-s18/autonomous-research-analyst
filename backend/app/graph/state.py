@@ -90,6 +90,7 @@ class ResearchState(TypedDict):
     sources: list[Source]
     citations: list[Citation]
     source_failures: list[SourceFailure]
+    retry_urls: list[str]
     conflicts: list[Conflict]
 
     draft_report: str | None
@@ -126,6 +127,7 @@ def create_initial_research_state(
         "sources": [],
         "citations": [],
         "source_failures": [],
+        "retry_urls": [],
         "conflicts": [],
         "draft_report": None,
         "final_report": None,

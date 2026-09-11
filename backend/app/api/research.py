@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from app.services.background import run_research_in_background
 from app.api.dependencies import get_research_service
 from app.schemas.research import ResearchCreate, ResearchResponse
 from app.services.research import ResearchService
@@ -19,16 +19,21 @@ router = APIRouter(
 )
 async def create_research(
     data: ResearchCreate,
-    service: ResearchService = Depends(get_research_service), #noqa: B008
+    background_tasks: BackgroundTasks,
+    service: ResearchService = Depends(get_research_service),  # noqa: B008
 ) -> ResearchResponse:
-    """Create a new research session."""
+    """Create a research session and start research in the background."""
 
     research_session = await service.create_research_session(
         data.question,
     )
 
-    return ResearchResponse.model_validate(research_session)
+    background_tasks.add_task(
+        run_research_in_background,
+        research_session.id,
+    )
 
+    return ResearchResponse.model_validate(research_session)
 
 @router.get(
     "",

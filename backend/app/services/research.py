@@ -33,15 +33,18 @@ class ResearchService:
 
     async def run_research(
         self,
-        question: str,
+        research_id: UUID,
     ) -> ResearchSession | None:
-        """Run a research workflow and persist its result."""
+        """Run a research workflow for an existing research session."""
 
-        research_session = await self.create_research_session(question)
+        research_session = await self.get_research_session(research_id)
+
+        if research_session is None:
+            return None
 
         initial_state = create_initial_research_state(
             research_session.id,
-            question,
+            research_session.question,
         )
 
         graph = self._build_research_graph()

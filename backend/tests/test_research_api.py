@@ -1,4 +1,5 @@
 from uuid import UUID
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -18,8 +19,19 @@ async def client():
         yield client
 
 
+@pytest.fixture
+def mock_background_research():
+    with patch(
+        "app.api.research.run_research_in_background",
+    ) as mock:
+        yield mock
+
+
 @pytest.mark.asyncio
-async def test_create_research_session(client: httpx.AsyncClient) -> None:
+async def test_create_research_session(
+    client: httpx.AsyncClient,
+    mock_background_research,
+) -> None:
     response = await client.post(
         "/api/research",
         json={
@@ -39,6 +51,8 @@ async def test_create_research_session(client: httpx.AsyncClient) -> None:
     assert data["confidence"] is None
     assert data["final_report"] is None
 
+    mock_background_research.assert_called_once()
+
     delete_response = await client.delete(
         f"/api/research/{data['id']}"
     )
@@ -47,7 +61,10 @@ async def test_create_research_session(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_research_session(client: httpx.AsyncClient) -> None:
+async def test_get_research_session(
+    client: httpx.AsyncClient,
+    mock_background_research,
+) -> None:
     create_response = await client.post(
         "/api/research",
         json={"question": "How does AI affect software engineering jobs?"},
@@ -68,6 +85,8 @@ async def test_get_research_session(client: httpx.AsyncClient) -> None:
         "How does AI affect software engineering jobs?"
     )
 
+    mock_background_research.assert_called_once()
+
     delete_response = await client.delete(
         f"/api/research/{research_id}"
     )
@@ -76,7 +95,10 @@ async def test_get_research_session(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_research_sessions(client: httpx.AsyncClient) -> None:
+async def test_list_research_sessions(
+    client: httpx.AsyncClient,
+    mock_background_research,
+) -> None:
     first = await client.post(
         "/api/research",
         json={"question": "First research question"},
@@ -102,6 +124,8 @@ async def test_list_research_sessions(client: httpx.AsyncClient) -> None:
     assert first_id in ids
     assert second_id in ids
 
+    assert mock_background_research.call_count == 2
+
     await client.delete(f"/api/research/{first_id}")
     await client.delete(f"/api/research/{second_id}")
 
@@ -121,6 +145,7 @@ async def test_get_missing_research_session(
 @pytest.mark.asyncio
 async def test_delete_research_session(
     client: httpx.AsyncClient,
+    mock_background_research,
 ) -> None:
     create_response = await client.post(
         "/api/research",
@@ -142,6 +167,8 @@ async def test_delete_research_session(
     )
 
     assert get_response.status_code == 404
+
+    mock_background_research.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from pydantic_core import to_jsonable_python
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +71,6 @@ class ResearchSessionRepository:
 
         return research_session
 
-
     async def save_checkpoint(
         self,
         research_id: UUID,
@@ -83,13 +83,14 @@ class ResearchSessionRepository:
         if research_session is None:
             return None
 
-        research_session.workflow_state = workflow_state
+        research_session.workflow_state = to_jsonable_python(
+            workflow_state,
+        )
 
         await self.session.commit()
         await self.session.refresh(research_session)
 
         return research_session
-
 
     async def get_checkpoint(
         self,

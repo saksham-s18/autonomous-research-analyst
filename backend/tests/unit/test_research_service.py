@@ -490,3 +490,57 @@ async def test_get_research_status_from_checkpoint() -> None:
     repository.get_checkpoint.assert_awaited_once_with(
         research_session.id,
     )
+
+
+@pytest.mark.asyncio
+async def test_run_research_logs_lifecycle_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import patch
+
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_session = ResearchSession(
+        question="What are the effects of AI automation?",
+    )
+    repository.get_by_id.return_value = research_session
+    repository.save_result.return_value = research_session
+
+    class FakeGraph:
+        async def astream(self, initial_state, stream_mode):
+            yield {
+                **initial_state,
+                "status": "synthesizing",
+                "research_plan": {"goal": "test", "subquestions": []},
+                "sources": [],
+                "evidence": [],
+                "citations": [],
+                "conflicts": [],
+                "sufficiency_score": 1.0,
+                "sufficiency_reasons": [],
+                "confidence": 0.95,
+                "final_report": "report",
+            }
+
+    monkeypatch.setattr(
+        service,
+        "_build_research_graph",
+        lambda: FakeGraph(),
+    )
+
+    with patch("app.services.research.logger") as mock_logger:
+        await service.run_research(research_session.id)
+
+    mock_logger.info.assert_any_call(
+        "research_run_started",
+        extra={"research_id": str(research_session.id)},
+    )
+    mock_logger.info.assert_any_call(
+        "research_run_completed",
+        extra={
+            "research_id": str(research_session.id),
+            "status": "synthesizing",
+            "confidence": 0.95,
+        },
+    )

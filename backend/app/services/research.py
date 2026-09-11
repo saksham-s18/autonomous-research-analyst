@@ -1,8 +1,12 @@
 from uuid import UUID
 
+from app.core.logging import get_logger
 from app.graph.state import create_initial_research_state
 from app.models.research_session import ResearchSession
 from app.repositories.research_session import ResearchSessionRepository
+
+logger = get_logger(__name__)
+
 
 class ResearchService:
     """Application logic for research sessions."""
@@ -37,9 +41,18 @@ class ResearchService:
     ) -> ResearchSession | None:
         """Run a research workflow for an existing research session."""
 
+        logger.info(
+            "research_run_started",
+            extra={"research_id": str(research_id)},
+        )
+
         research_session = await self.get_research_session(research_id)
 
         if research_session is None:
+            logger.warning(
+                "research_session_not_found",
+                extra={"research_id": str(research_id)},
+            )
             return None
 
         initial_state = create_initial_research_state(
@@ -63,9 +76,13 @@ class ResearchService:
             )
 
         if result is None:
+            logger.warning(
+                "research_run_yielded_no_result",
+                extra={"research_id": str(research_id)},
+            )
             return None
 
-        return await self.save_research_result(
+        saved = await self.save_research_result(
             research_session.id,
             status=result["status"],
             research_plan=result["research_plan"],
@@ -81,6 +98,17 @@ class ResearchService:
             final_report=result["final_report"],
         )
 
+        logger.info(
+            "research_run_completed",
+            extra={
+                "research_id": str(research_id),
+                "status": result["status"],
+                "confidence": result.get("confidence"),
+            },
+        )
+
+        return saved
+
 
     async def resume_research(
         self,
@@ -88,14 +116,27 @@ class ResearchService:
     ) -> ResearchSession | None:
         """Resume a research workflow from its latest persisted checkpoint."""
 
+        logger.info(
+            "research_resume_started",
+            extra={"research_id": str(research_id)},
+        )
+
         research_session = await self.get_research_session(research_id)
 
         if research_session is None:
+            logger.warning(
+                "research_session_not_found",
+                extra={"research_id": str(research_id)},
+            )
             return None
 
         checkpoint = await self.get_research_checkpoint(research_id)
 
         if checkpoint is None:
+            logger.info(
+                "research_resume_no_checkpoint",
+                extra={"research_id": str(research_id)},
+            )
             return research_session
 
         graph = self._build_research_graph()
@@ -114,9 +155,13 @@ class ResearchService:
             )
 
         if result is None:
+            logger.warning(
+                "research_resume_yielded_no_result",
+                extra={"research_id": str(research_id)},
+            )
             return research_session
 
-        return await self.save_research_result(
+        saved = await self.save_research_result(
             research_id,
             status=result["status"],
             research_plan=result["research_plan"],
@@ -131,6 +176,18 @@ class ResearchService:
             confidence=result["confidence"],
             final_report=result["final_report"],
         )
+
+        logger.info(
+            "research_resume_completed",
+            extra={
+                "research_id": str(research_id),
+                "status": result["status"],
+                "confidence": result.get("confidence"),
+            },
+        )
+
+        return saved
+
 
     async def save_research_result(
         self,
@@ -175,10 +232,19 @@ class ResearchService:
     ) -> ResearchSession | None:
         """Persist the current workflow state for a research session."""
 
+        logger.debug(
+            "research_checkpoint_saved",
+            extra={
+                "research_id": str(research_id),
+                "status": workflow_state.get("status"),
+            },
+        )
+
         return await self.repository.save_checkpoint(
             research_id,
             workflow_state,
         )
+
 
     async def get_research_checkpoint(
         self,

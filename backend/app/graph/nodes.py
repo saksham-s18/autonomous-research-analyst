@@ -38,9 +38,22 @@ logger = logging.getLogger(__name__)
 async def planner_node(state: ResearchState) -> ResearchState:
     """Generate a research plan using the planner agent."""
 
+    logger.info(
+        "planner_node_started",
+        extra={"research_id": str(state.get("research_id"))},
+    )
+
     planner = create_planner_agent()
 
     plan = await planner.create_plan(state["question"])
+
+    logger.info(
+        "planner_node_completed",
+        extra={
+            "research_id": str(state.get("research_id")),
+            "subquestions_count": len(plan.subquestions),
+        },
+    )
 
     return {
         **state,
@@ -54,6 +67,7 @@ async def planner_node(state: ResearchState) -> ResearchState:
         "research_iterations": 0,
         "max_research_iterations": 3,
     }
+
 
 
 def create_planner_agent() -> PlannerAgent:
@@ -199,6 +213,14 @@ async def research_node(state: ResearchState) -> ResearchState:
     sources = []
 
     if state["retry_urls"]:
+        logger.info(
+            "research_retry_started",
+            extra={
+                "research_id": str(state.get("research_id")),
+                "retry_urls_count": len(state["retry_urls"]),
+                "iteration": research_iterations,
+            },
+        )
         results = [
             {
                 "title": "Retry source",
@@ -208,11 +230,20 @@ async def research_node(state: ResearchState) -> ResearchState:
             for url in state["retry_urls"]
         ]
     else:
+        logger.info(
+            "research_subquestion_started",
+            extra={
+                "research_id": str(state.get("research_id")),
+                "subquestion": current,
+                "iteration": research_iterations,
+            },
+        )
         results = await researcher.research(
             current,
             max_results=5,
         )
         results = deduplicate_search_results(results)
+
 
     for result in results:
         quality = assess_source_quality(result["url"])
@@ -400,10 +431,15 @@ def route_after_research(state: ResearchState) -> str:
     )
 
     logger.info(
-        "Research routing decision: route=%s reason=%s",
-        decision.route,
-        decision.reason,
+        "research_routing_decision",
+        extra={
+            "research_id": str(state.get("research_id")),
+            "route": decision.route,
+            "reason": decision.reason,
+            "research_iterations": state["research_iterations"],
+        },
     )
+
 
     if decision.route == "synthesis":
         return "synthesis"
@@ -497,11 +533,15 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
         )
     except RuntimeError as exc:
         logger.warning(
-            "Synthesis generation failed: %s",
-            exc,
+            "synthesis_generation_failed",
+            extra={
+                "research_id": str(state.get("research_id")),
+                "error": str(exc),
+            },
         )
 
         return {
+
             **state,
             "status": "synthesis_failed",
             "current_subquestion": None,
@@ -524,9 +564,18 @@ async def synthesis_node(state: ResearchState) -> ResearchState:
         citations,
     )
 
+    logger.info(
+        "synthesis_node_completed",
+        extra={
+            "research_id": str(state.get("research_id")),
+            "confidence": result.confidence,
+        },
+    )
+
     return {
         **state,
         "status": "synthesizing",
+
         "current_subquestion": None,
         "draft_report": result.executive_summary,
         "final_report": format_report_with_citations(

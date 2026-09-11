@@ -9,6 +9,32 @@ from app.core.config import get_settings
 class JsonFormatter(logging.Formatter):
     """Format log records as structured JSON."""
 
+    # Standard attributes of LogRecord to exclude from structured payload
+    RESERVED_ATTRS = {
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+    }
+
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -17,10 +43,14 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
 
+        for key, value in record.__dict__.items():
+            if key not in self.RESERVED_ATTRS and not key.startswith("_"):
+                log_data[key] = value
+
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
 
-        return json.dumps(log_data)
+        return json.dumps(log_data, default=str)
 
 
 def configure_logging() -> None:

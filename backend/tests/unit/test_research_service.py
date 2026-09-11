@@ -115,7 +115,7 @@ async def test_run_research_persists_workflow_result(
     research_session = ResearchSession(
         question="What are the effects of AI automation?",
     )
-    repository.create.return_value = research_session
+    repository.get_by_id.return_value = research_session
 
     saved_session = ResearchSession(
         question="What are the effects of AI automation?",
@@ -178,13 +178,13 @@ async def test_run_research_persists_workflow_result(
     )
 
     result = await service.run_research(
-        "What are the effects of AI automation?"
+        research_session.id,
     )
 
     assert result is saved_session
 
-    repository.create.assert_awaited_once_with(
-        "What are the effects of AI automation?"
+    repository.get_by_id.assert_awaited_once_with(
+        research_session.id,
     )
 
     repository.save_result.assert_awaited_once_with(
@@ -399,4 +399,94 @@ async def test_resume_research_uses_saved_checkpoint(
         sufficiency_reasons=[],
         confidence=0.90,
         final_report="Resumed research report",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_research_status_without_checkpoint() -> None:
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_session = ResearchSession(
+        question="What are the effects of AI automation?",
+        status="pending",
+    )
+
+    repository.get_by_id.return_value = research_session
+    repository.get_checkpoint.return_value = None
+
+    result = await service.get_research_status(research_session.id)
+
+    assert result == {
+        "id": research_session.id,
+        "status": "pending",
+        "progress": {
+            "completed_subquestions": 0,
+            "total_subquestions": 0,
+            "research_iterations": 0,
+            "max_research_iterations": 3,
+        },
+        "error": None,
+    }
+
+    repository.get_by_id.assert_awaited_once_with(
+        research_session.id,
+    )
+    repository.get_checkpoint.assert_awaited_once_with(
+        research_session.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_research_status_from_checkpoint() -> None:
+    repository = AsyncMock(spec=ResearchSessionRepository)
+    service = ResearchService(repository)
+
+    research_session = ResearchSession(
+        question="What are the effects of AI automation?",
+        status="researching",
+    )
+
+    checkpoint = {
+        "status": "researching",
+        "research_plan": {
+            "goal": "What are the effects of AI automation?",
+            "subquestions": [
+                "What are the main effects?",
+                "What evidence exists?",
+                "What are the risks?",
+                "What are the limitations?",
+            ],
+        },
+        "completed_subquestions": [
+            "What are the main effects?",
+            "What evidence exists?",
+        ],
+        "research_iterations": 2,
+        "max_research_iterations": 3,
+        "error": None,
+    }
+
+    repository.get_by_id.return_value = research_session
+    repository.get_checkpoint.return_value = checkpoint
+
+    result = await service.get_research_status(research_session.id)
+
+    assert result == {
+        "id": research_session.id,
+        "status": "researching",
+        "progress": {
+            "completed_subquestions": 2,
+            "total_subquestions": 4,
+            "research_iterations": 2,
+            "max_research_iterations": 3,
+        },
+        "error": None,
+    }
+
+    repository.get_by_id.assert_awaited_once_with(
+        research_session.id,
+    )
+    repository.get_checkpoint.assert_awaited_once_with(
+        research_session.id,
     )

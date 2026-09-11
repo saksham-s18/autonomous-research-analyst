@@ -185,3 +185,57 @@ async def test_create_research_with_invalid_question(
     data = response.json()
 
     assert data["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_get_research_status(
+    client: httpx.AsyncClient,
+    mock_background_research,
+) -> None:
+    create_response = await client.post(
+        "/api/research",
+        json={"question": "What are the effects of AI on employment?"},
+    )
+
+    assert create_response.status_code == 201
+
+    research_id = create_response.json()["id"]
+
+    response = await client.get(
+        f"/api/research/{research_id}/status",
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["id"] == research_id
+    assert data["status"] == "pending"
+    assert data["progress"] == {
+        "completed_subquestions": 0,
+        "total_subquestions": 0,
+        "research_iterations": 0,
+        "max_research_iterations": 3,
+    }
+    assert data["error"] is None
+
+    mock_background_research.assert_called_once()
+
+    delete_response = await client.delete(
+        f"/api/research/{research_id}",
+    )
+
+    assert delete_response.status_code == 204
+
+@pytest.mark.asyncio
+async def test_get_missing_research_status(
+    client: httpx.AsyncClient,
+) -> None:
+    missing_id = "00000000-0000-0000-0000-000000000000"
+
+    response = await client.get(
+        f"/api/research/{missing_id}/status",
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Research session not found."

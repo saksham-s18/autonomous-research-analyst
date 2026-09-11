@@ -26,3 +26,20 @@ class ResearchResponse(BaseModel):
     final_report: str | None
     created_at: datetime
     updated_at: datetime
+
+class ResearchProgress(BaseModel):
+    """Progress information for a research workflow."""
+
+    completed_subquestions: int
+    total_subquestions: int
+    research_iterations: int
+    max_research_iterations: int
+
+
+class ResearchStatusResponse(BaseModel):
+    """API response describing current research status and progress."""
+
+    id: UUID
+    status: str
+    progress: ResearchProgress
+    error: str | None

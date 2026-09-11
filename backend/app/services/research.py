@@ -188,6 +188,60 @@ class ResearchService:
 
         return await self.repository.get_checkpoint(research_id)
 
+    async def get_research_status(
+        self,
+        research_id: UUID,
+    ) -> dict | None:
+        """Return the current persisted status and progress."""
+
+        research_session = await self.get_research_session(research_id)
+
+        if research_session is None:
+            return None
+
+        checkpoint = await self.get_research_checkpoint(research_id)
+
+        if checkpoint is None:
+            return {
+                "id": research_session.id,
+                "status": research_session.status,
+                "progress": {
+                    "completed_subquestions": 0,
+                    "total_subquestions": 0,
+                    "research_iterations": 0,
+                    "max_research_iterations": 3,
+                },
+                "error": None,
+            }
+
+        research_plan = checkpoint.get("research_plan") or {}
+        subquestions = research_plan.get("subquestions") or []
+        completed_subquestions = checkpoint.get(
+            "completed_subquestions",
+            [],
+        )
+
+        return {
+            "id": research_session.id,
+            "status": checkpoint.get(
+                "status",
+                research_session.status,
+            ),
+            "progress": {
+                "completed_subquestions": len(completed_subquestions),
+                "total_subquestions": len(subquestions),
+                "research_iterations": checkpoint.get(
+                    "research_iterations",
+                    0,
+                ),
+                "max_research_iterations": checkpoint.get(
+                    "max_research_iterations",
+                    3,
+                ),
+            },
+            "error": checkpoint.get("error"),
+        }
+
     async def get_research_session(
         self,
         research_id: UUID,

@@ -3,7 +3,11 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.services.background import run_research_in_background
 from app.api.dependencies import get_research_service
-from app.schemas.research import ResearchCreate, ResearchResponse
+from app.schemas.research import (
+    ResearchCreate,
+    ResearchResponse,
+    ResearchStatusResponse,
+)
 from app.services.research import ResearchService
 
 router = APIRouter(
@@ -51,6 +55,24 @@ async def list_research(
         for session in research_sessions
     ]
 
+@router.get(
+    "/{research_id}/status",
+    response_model=ResearchStatusResponse,
+)
+async def get_research_status(
+    research_id: UUID,
+    service: ResearchService = Depends(get_research_service),  # noqa: B008
+) -> ResearchStatusResponse:
+    """Get the current status and progress of a research session."""
+    research_status = await service.get_research_status(research_id)
+
+    if research_status is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research session not found.",
+        )
+
+    return ResearchStatusResponse.model_validate(research_status)
 
 @router.get(
     "/{research_id}",
